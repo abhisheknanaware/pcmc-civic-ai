@@ -1,0 +1,331 @@
+{
+  "_about": "Single source of PCMC reference data for the NLP pipeline, backend and frontend (served at GET /api/meta).",
+  "_sources": {
+    "zones": "https://www.pcmcindia.gov.in/ward_info (retrieved 2026-09-25)",
+    "departments": "https://www.pcmcindia.gov.in/departments (retrieved 2026-09-25)"
+  },
+  "corporation": {
+    "en": "Pimpri-Chinchwad Municipal Corporation",
+    "hi": "पिंपरी-चिंचवड नगर निगम",
+    "mr": "पिंपरी-चिंचवड महानगरपालिका",
+    "short": "PCMC",
+    "website": "https://www.pcmcindia.gov.in",
+    "sarathiHelpline": "8888006666",
+    "grievancePortal": "https://grievance.pcmcindia.gov.in:8443/Grievance/citizen/",
+    "mapCenter": [
+      18.6298,
+      73.7997
+    ]
+  },
+  "zones": {
+    "A": {
+      "name": "Rajgad",
+      "mr": "राजगड",
+      "office": "Sant Dnyaneshwar Chowk, Nigdi Pradhikaran, Nigdi 411044",
+      "phone": "020-27646621",
+      "email": "azone@pcmcindia.gov.in",
+      "wards": [
+        13,
+        14,
+        15
+      ]
+    },
+    "B": {
+      "name": "Sinhagad",
+      "mr": "सिंहगड",
+      "office": "Link Road, Elpro Company Compound, Chinchwadgaon 411033",
+      "phone": "020-27350153",
+      "email": "bzone@pcmcindia.gov.in",
+      "wards": [
+        17,
+        18,
+        19
+      ]
+    },
+    "C": {
+      "name": "Vijaydurg",
+      "mr": "विजयदुर्ग",
+      "office": "Near Hockey Stadium, Nehrunagar, Bhosari 411026",
+      "phone": "020-27122969",
+      "email": "czone@pcmcindia.gov.in",
+      "wards": [
+        2,
+        9,
+        10
+      ]
+    },
+    "D": {
+      "name": "Devgiri",
+      "mr": "देवगिरी",
+      "office": "Aundh-Ravet Road, Rahatani 411017",
+      "phone": "020-27277898",
+      "email": "dzone@pcmcindia.gov.in",
+      "wards": [
+        21,
+        27,
+        28,
+        29
+      ]
+    },
+    "E": {
+      "name": "Shivneri",
+      "mr": "शिवनेरी",
+      "office": "Near Panjarpol, Nashik Road, Bhosari 411039",
+      "phone": "020-27230412",
+      "email": "ezone@pcmcindia.gov.in",
+      "wards": [
+        3,
+        4,
+        5
+      ]
+    },
+    "F": {
+      "name": "Torna",
+      "mr": "तोरणा",
+      "office": "Old Navnagar Development Authority Building, Lokmanya Tilak Chowk, Nigdi 411044",
+      "phone": "020-27230410",
+      "email": "fzone@pcmcindia.gov.in",
+      "wards": [
+        1,
+        11,
+        12
+      ]
+    },
+    "G": {
+      "name": "Purandar",
+      "mr": "पुरंदर",
+      "office": "New Administrative Building, Thergaon 411033",
+      "phone": "7887879555",
+      "email": "gzone@pcmcindia.gov.in",
+      "wards": [
+        22,
+        23,
+        24
+      ]
+    },
+    "H": {
+      "name": "Pratapgad",
+      "mr": "प्रतापगड",
+      "office": "Women's ITI Building, Kasarwadi",
+      "phone": "020-27142503",
+      "email": "hzone@pcmcindia.gov.in",
+      "wards": [
+        30,
+        31,
+        32
+      ]
+    },
+    "J": {
+      "name": "Raigad",
+      "mr": "रायगड",
+      "office": "PCMC Transport Department Building, Tathawade 411033",
+      "phone": null,
+      "email": "jzone@pcmcindia.gov.in",
+      "wards": [
+        16,
+        25,
+        26
+      ]
+    },
+    "L": {
+      "name": "Lohagad",
+      "mr": "लोहगड",
+      "office": "MHADA Plot E-2, Sant Tukaram Nagar, Pimpri 411018",
+      "phone": null,
+      "email": "lzone@pcmcindia.gov.in",
+      "wards": [
+        6,
+        7,
+        8,
+        20
+      ]
+    }
+  },
+  "_localities_note": "Locality -> prabhag (ward) number. Intentionally empty: fill ONLY from PCMC's official ward-boundary notification. Keys are lowercase English names; add Devanagari spellings as separate keys. Example: \"some locality\": 13",
+  "localities": {},
+  "departments": [
+    {
+      "id": "Civil Engineering",
+      "mr": "स्थापत्य",
+      "hi": "सिविल इंजीनियरिंग (स्थापत्य)"
+    },
+    {
+      "id": "Electrical",
+      "mr": "विद्युत",
+      "hi": "विद्युत"
+    },
+    {
+      "id": "Water Supply",
+      "mr": "पाणी पुरवठा",
+      "hi": "जल आपूर्ति"
+    },
+    {
+      "id": "Drainage",
+      "mr": "जलनिःसारण",
+      "hi": "जल निकासी"
+    },
+    {
+      "id": "Health",
+      "mr": "आरोग्य",
+      "hi": "स्वास्थ्य"
+    },
+    {
+      "id": "Medical",
+      "mr": "वैद्यकीय",
+      "hi": "चिकित्सा"
+    },
+    {
+      "id": "Building Permission & Unauthorised Construction Control",
+      "mr": "बांधकाम परवानगी व अनधिकृत बांधकाम नियंत्रण",
+      "hi": "भवन अनुमति एवं अनधिकृत निर्माण नियंत्रण"
+    },
+    {
+      "id": "Gardens",
+      "mr": "उद्यान",
+      "hi": "उद्यान"
+    },
+    {
+      "id": "Environmental Engineering",
+      "mr": "पर्यावरण अभियांत्रिकी",
+      "hi": "पर्यावरण अभियांत्रिकी"
+    },
+    {
+      "id": "Tax Collection",
+      "mr": "कर संकलन",
+      "hi": "कर संग्रह"
+    },
+    {
+      "id": "Disaster Management",
+      "mr": "आपत्ती व्यवस्थापन",
+      "hi": "आपदा प्रबंधन"
+    },
+    {
+      "id": "Fire",
+      "mr": "अग्निशामक",
+      "hi": "अग्निशमन"
+    },
+    {
+      "id": "Primary Education",
+      "mr": "प्राथमिक शिक्षण",
+      "hi": "प्राथमिक शिक्षा"
+    },
+    {
+      "id": "Secondary Education",
+      "mr": "माध्यमिक शिक्षण",
+      "hi": "माध्यमिक शिक्षा"
+    },
+    {
+      "id": "Veterinary",
+      "mr": "पशुवैद्यकीय",
+      "hi": "पशु चिकित्सा"
+    },
+    {
+      "id": "Slum Rehabilitation",
+      "mr": "झोपडपट्टी निर्मुलन व पुनर्वसन",
+      "hi": "झुग्गी उन्मूलन एवं पुनर्वास"
+    },
+    {
+      "id": "Town Planning",
+      "mr": "नगर रचना",
+      "hi": "नगर नियोजन"
+    },
+    {
+      "id": "Zonal Office",
+      "mr": "क्षेत्रीय कार्यालय",
+      "hi": "क्षेत्रीय कार्यालय"
+    },
+    {
+      "id": "Traffic Police (external)",
+      "mr": "वाहतूक पोलीस (बाह्य)",
+      "hi": "यातायात पुलिस (बाहरी)",
+      "external": true
+    }
+  ],
+  "_routing_note": "Department names are from the official PCMC list. confirmed=true: the department's own name clearly covers the category. confirmed=false: plausible assignment that still needs confirmation from PCMC.",
+  "categoryRouting": {
+    "Garbage & Solid Waste": {
+      "department": "Health",
+      "confirmed": false
+    },
+    "Road & Potholes": {
+      "department": "Civil Engineering",
+      "confirmed": true
+    },
+    "Street Lights & Electrical": {
+      "department": "Electrical",
+      "confirmed": true
+    },
+    "Water Supply": {
+      "department": "Water Supply",
+      "confirmed": true
+    },
+    "Drainage & Sewerage": {
+      "department": "Drainage",
+      "confirmed": true
+    },
+    "Storm-Water / Rainwater": {
+      "department": "Drainage",
+      "confirmed": false
+    },
+    "Traffic & Transportation": {
+      "department": "Traffic Police (external)",
+      "confirmed": true
+    },
+    "Encroachment": {
+      "department": "Building Permission & Unauthorised Construction Control",
+      "confirmed": false
+    },
+    "Public Health & Sanitation": {
+      "department": "Health",
+      "confirmed": true
+    },
+    "Stray Animals": {
+      "department": "Veterinary",
+      "confirmed": false
+    },
+    "Tree & Garden": {
+      "department": "Gardens",
+      "confirmed": true
+    },
+    "Pollution & Environment": {
+      "department": "Environmental Engineering",
+      "confirmed": false
+    },
+    "Property Tax": {
+      "department": "Tax Collection",
+      "confirmed": true
+    },
+    "Building & Construction": {
+      "department": "Building Permission & Unauthorised Construction Control",
+      "confirmed": true
+    },
+    "Public Infrastructure": {
+      "department": "Civil Engineering",
+      "confirmed": false
+    },
+    "Safety": {
+      "department": "Disaster Management",
+      "confirmed": false
+    },
+    "Education": {
+      "department": "Primary Education",
+      "confirmed": false
+    },
+    "Citizen Services": {
+      "department": "Zonal Office",
+      "confirmed": false
+    },
+    "Other / General": {
+      "department": "Zonal Office",
+      "confirmed": false
+    }
+  },
+  "defaultDepartment": "Zonal Office",
+  "_sla_note": "Target response times set by this system per priority; not official PCMC service timelines.",
+  "slaHours": {
+    "P1": 24,
+    "P2": 48,
+    "P3": 168,
+    "P4": 336
+  }
+}

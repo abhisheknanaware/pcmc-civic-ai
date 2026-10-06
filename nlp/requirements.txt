@@ -1,0 +1,27 @@
+fastapi
+uvicorn
+python-multipart
+presidio-analyzer
+presidio-anonymizer
+openai-whisper
+transformers
+torch
+spacy
+requests
+langgraph
+langchain-core
+python-dotenv
+langdetect
+
+# Knowledge-base ingestion and hybrid retrieval (nlp/ingest, nlp/chat/hybrid.py)
+httpx
+numpy
+trafilatura
+beautifulsoup4
+lxml
+pymupdf
+pytesseract
+pillow
+qdrant-client
+# optional: cross-encoder re-ranker (KB_RERANK=1)
+sentence-transformers
