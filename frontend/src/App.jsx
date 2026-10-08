@@ -13,6 +13,7 @@ import Analytics from './pages/Analytics';
 import MapView from './pages/MapView';
 import ChatWidget from './components/ChatWidget';
 import AskPcmc from './pages/AskPcmc';
+import KnowledgeBase from './pages/KnowledgeBase';
 import Skyline from './components/Skyline';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MetaProvider, useMeta } from './context/MetaContext';
@@ -73,6 +74,7 @@ function Shell() {
                   <Map size={14}/> {t('nav_map')}
                 </NavLink>
                 <NavLink to="/analytics">{t('nav_analytics')}</NavLink>
+                <NavLink to="/knowledge">{t('nav_knowledge')}</NavLink>
               </>
             )}
 
@@ -106,6 +108,7 @@ function Shell() {
           <Route path="/dashboard" element={<OfficerRoute><Dashboard /></OfficerRoute>} />
           <Route path="/map" element={<OfficerRoute><MapView /></OfficerRoute>} />
           <Route path="/analytics" element={<OfficerRoute><Analytics /></OfficerRoute>} />
+          <Route path="/knowledge" element={<OfficerRoute><KnowledgeBase /></OfficerRoute>} />
           <Route path="/ticket/:id" element={<OfficerRoute><TicketDetails /></OfficerRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

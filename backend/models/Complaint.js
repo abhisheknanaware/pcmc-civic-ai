@@ -81,6 +81,9 @@ const complaintSchema = new mongoose.Schema({
     score: Number
   }],
   imageUrl: { type: String },
+  // "After" photo uploaded by the officer as proof that the issue was fixed.
+  resolutionImageUrl: { type: String },
+  resolutionImageAt: { type: Date },
   status: {
     type: String,
     enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_FOR_CUSTOMER', 'RESOLVED', 'CLOSED'],

@@ -11,6 +11,7 @@ query -> time scope (current / year / specific circular)
 The chunks are loaded from the local Qdrant store into memory at startup and the store is released
 straight away, so the ingestion job can update it while the service runs (then call reload()).
 """
+import json
 import logging
 import math
 import os
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 NLP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 QDRANT_PATH = os.path.join(NLP_ROOT, "data", "qdrant")
 COLLECTION = "pcmc_kb"
+# Officer decisions from the knowledge-base admin page (verify / disable / supersede), applied on every load.
+OVERRIDES_PATH = os.path.join(NLP_ROOT, "data", "kb_overrides.json")
+DOC_STATUSES = ("active", "disabled", "superseded")
 RERANK_MODEL = os.getenv("KB_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 CANDIDATES = int(os.getenv("KB_CANDIDATES", "30"))
 RERANK_TOP = int(os.getenv("KB_RERANK_TOP", "12"))
@@ -108,11 +112,73 @@ class HybridRetriever:
             if USE_RERANKER and self.reranker is None:
                 from sentence_transformers import CrossEncoder
                 self.reranker = CrossEncoder(RERANK_MODEL, device="cpu", max_length=384)
+            for doc_id, decision in self._read_overrides().items():
+                self._apply(doc_id, decision)
             self.ready = True
         logger.info(f"Hybrid KB loaded: {n} chunks in {time.time() - started:.1f}s")
         return True
 
     reload = load
+
+    # ---------------- officer review (knowledge-base admin) ----------------
+    @staticmethod
+    def _read_overrides():
+        try:
+            with open(OVERRIDES_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _apply(self, doc_id, decision):
+        for c in self.by_doc.get(doc_id, []):
+            if "status" in decision:
+                c["status"] = decision["status"]
+            if "verified" in decision:
+                c["verified"] = bool(decision["verified"])
+
+    def set_document_review(self, doc_id, status=None, verified=None, reviewer=None):
+        """Record an officer's decision; takes effect immediately and survives reloads/re-indexing."""
+        if doc_id not in self.by_doc:
+            raise KeyError(doc_id)
+        if status is not None and status not in DOC_STATUSES:
+            raise ValueError("status must be one of " + ", ".join(DOC_STATUSES))
+        overrides = self._read_overrides()
+        decision = overrides.get(doc_id, {})
+        if status is not None:
+            decision["status"] = status
+        if verified is not None:
+            decision["verified"] = bool(verified)
+        decision.update(reviewed_by=reviewer, reviewed_at=datetime.now().isoformat(timespec="seconds"))
+        overrides[doc_id] = decision
+        tmp = OVERRIDES_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(overrides, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, OVERRIDES_PATH)
+        with self._lock:
+            self._apply(doc_id, decision)
+        return self.document_summary(doc_id, overrides)
+
+    def document_summary(self, doc_id, overrides=None):
+        chunks = self.by_doc.get(doc_id, [])
+        if not chunks:
+            return None
+        first = chunks[0]
+        review = (overrides if overrides is not None else self._read_overrides()).get(doc_id, {})
+        return {
+            "id": doc_id, "title": first.get("title") or first.get("section") or "PCMC", "titleEn": first.get("title_en"),
+            "url": first.get("url"), "category": first.get("category"), "department": first.get("department"),
+            "language": first.get("language"), "extraction": first.get("extraction_method"),
+            "ocrConfidence": first.get("ocr_confidence"), "authorityLevel": first.get("authority_level"),
+            "publishedDate": first.get("published_date"), "fetchedAt": (first.get("fetched_at") or "")[:10],
+            "status": first.get("status") or "active", "verified": bool(first.get("verified")), "chunks": len(chunks),
+            "chars": sum(len(c.get("body") or c.get("text") or "") for c in chunks),
+            "preview": (first.get("body") or first.get("text") or "")[:220],
+            "reviewedBy": review.get("reviewed_by"), "reviewedAt": review.get("reviewed_at"),
+        }
+
+    def documents(self):
+        overrides = self._read_overrides()
+        return [self.document_summary(doc_id, overrides) for doc_id in self.by_doc]
 
     # ---------------- scoring pieces ----------------
     def _bm25(self, query_tokens, idx, k1=1.4, b=0.75):

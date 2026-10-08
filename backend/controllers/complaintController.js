@@ -50,6 +50,9 @@ const citizenView = (c) => ({
   updatedAt: c.updatedAt,
   resolvedAt: c.resolvedAt,
   finalReply: ['RESOLVED', 'CLOSED'].includes(c.status) ? c.finalReply : undefined,
+  // The citizen's own photo, and the officer's proof-of-fix photo once the complaint is resolved.
+  imageUrl: c.imageUrl || undefined,
+  resolutionImageUrl: CLOSED_STATUSES.includes(c.status) ? c.resolutionImageUrl || undefined : undefined,
 });
 exports.citizenView = citizenView;
 
@@ -313,6 +316,28 @@ exports.updateComplaint = async (req, res) => {
   }
 };
 
+// Officer uploads an "after" photo as proof of the fix (Cloudinary, like citizen photos).
+exports.uploadResolutionPhoto = async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ message: 'Please choose an image file.' });
+  try {
+    const complaint = await Complaint.findById(req.params.id).select('department');
+    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+    if (req.user.role !== 'admin' && req.user.department && complaint.department !== req.user.department) {
+      return res.status(403).json({ message: 'This complaint belongs to another department.' });
+    }
+    const result = await cloudinary.uploader.upload(file.path, { folder: 'pmc_resolutions' });
+    const updated = await Complaint.findByIdAndUpdate(req.params.id,
+      { resolutionImageUrl: result.secure_url, resolutionImageAt: new Date() }, { new: true });
+    res.json(updated);
+  } catch (error) {
+    console.error('Resolution photo upload failed:', error.message);
+    res.status(502).json({ message: 'Could not upload the photo. Please try again.' });
+  } finally {
+    fs.promises.unlink(file.path).catch(() => {});
+  }
+};
+
 exports.resetDatabase = async (req, res) => {
   try {
     await Complaint.deleteMany({});
@@ -468,6 +493,7 @@ exports.submitFeedback = async (req, res) => {
       complaint.status = 'OPEN';
       complaint.resolvedAt = null;
       complaint.slaDeadline = calculateSLA(complaint.priority);
+      complaint.slaBreached = false;
       complaint.reopenCount = (complaint.reopenCount || 0) + 1;
       if (!complaint.history.length) complaint.history.push(...timeline(complaint));
       complaint.history.push({ event: 'REOPENED', at: new Date() });

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus, submitFeedback } = require('../controllers/complaintController');
+const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus, submitFeedback, uploadResolutionPhoto } = require('../controllers/complaintController');
 const { protect, admin } = require('../middleware/authMiddleware');
 const rateLimit = require('../middleware/rateLimit');
 
@@ -15,6 +15,12 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+// Proof-of-fix photos: images only, at most 8 MB.
+const imageUpload = multer({
+  storage,
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|heic|heif)$/.test(file.mimetype)),
+});
 
 // Citizen (public) endpoints
 router.post('/', rateLimit({ windowMs: 60 * 60 * 1000, max: 20 }), upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'image', maxCount: 1 }]), createComplaint);
@@ -27,5 +33,6 @@ router.delete('/reset', protect, admin, resetDatabase);
 router.post('/:id/generate-reply', protect, generateReplyForTicket);
 router.post('/:id/translate', protect, translateComplaint);
 router.patch('/:id', protect, updateComplaint);
+router.post('/:id/resolution-photo', protect, imageUpload.single('image'), uploadResolutionPhoto);
 
 module.exports = router;

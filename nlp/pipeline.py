@@ -3,7 +3,7 @@ import re
 import shutil
 import logging
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict, Any, TypedDict, List
 import uvicorn
@@ -164,7 +164,8 @@ def load_knowledge_base():
     load_in_background()
 
 @app.post("/kb/reload")
-def kb_reload():
+def kb_reload(request: Request):
+    local_only(request)
     from chat.hybrid import hybrid
     return {"loaded": hybrid.reload(), "chunks": len(hybrid.chunks)}
 
@@ -172,6 +173,35 @@ def kb_reload():
 def kb_status():
     from chat.hybrid import hybrid
     return {"ready": hybrid.ready, "chunks": len(hybrid.chunks)}
+
+# Knowledge-base admin: only the Express backend on this machine (which enforces officer login) may call these.
+def local_only(request: Request):
+    if request.client is None or request.client.host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="Knowledge-base admin is only available through the officer backend")
+
+@app.get("/kb/documents")
+def kb_documents(request: Request):
+    local_only(request)
+    from chat.hybrid import hybrid
+    if not hybrid.ready:
+        raise HTTPException(status_code=503, detail="Knowledge base is still loading")
+    return {"documents": hybrid.documents()}
+
+class DocumentReview(BaseModel):
+    status: Optional[str] = None
+    verified: Optional[bool] = None
+    reviewer: Optional[str] = None
+
+@app.post("/kb/documents/{doc_id}")
+def kb_review_document(doc_id: str, review: DocumentReview, request: Request):
+    local_only(request)
+    from chat.hybrid import hybrid
+    try:
+        return hybrid.set_document_review(doc_id, review.status, review.verified, review.reviewer)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Document not found")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
 @app.post("/chat/understand")
 async def chat_understand(req: ChatRequest):

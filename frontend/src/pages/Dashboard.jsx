@@ -23,6 +23,14 @@ const STATUS_TONE = {
 const isClosed = (c) => c.status === 'RESOLVED' || c.status === 'CLOSED';
 const isHighPriority = (c) => c.priority === 'P1' || c.priority === 'P2';
 const isBreached = (c) => !isClosed(c) && c.slaDeadline && new Date(c.slaDeadline) < new Date();
+const DUE_SOON_MS = 24 * 60 * 60 * 1000;
+// Still on time, but the deadline is within the next 24 hours.
+const isDueSoon = (c) => {
+  if (isClosed(c) || !c.slaDeadline) return false;
+  const left = new Date(c.slaDeadline) - new Date();
+  return left > 0 && left <= DUE_SOON_MS;
+};
+const SLA_FILTERS = { overdue: isBreached, soon: isDueSoon };
 const matchesCard = {
   ALL: () => true,
   OPEN: (c) => c.status === 'OPEN',
@@ -55,6 +63,7 @@ export default function Dashboard() {
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
+  const [slaFilter, setSlaFilter] = useState(null);
 
   const fetchComplaints = async (isPolling = false) => {
     try {
@@ -90,6 +99,7 @@ export default function Dashboard() {
 
   const countFor = (key) => complaints.filter(matchesCard[key]).length;
   const breached = complaints.filter(isBreached).length;
+  const dueSoon = complaints.filter(isDueSoon).length;
   const needle = query.trim().toLowerCase();
 
   const filteredComplaints = complaints.filter((c) =>
@@ -98,6 +108,7 @@ export default function Dashboard() {
     (categoryFilter === 'ALL' || c.category === categoryFilter) &&
     (zoneFilter === 'ALL' || c.zone === zoneFilter) &&
     (priorityFilter === 'ALL' || c.priority === priorityFilter) &&
+    (!slaFilter || SLA_FILTERS[slaFilter](c)) &&
     (!needle || [c.ticketNumber, c.category, L.category(c.category), c.translatedText, c.sanitizedText]
       .some((v) => v && String(v).toLowerCase().includes(needle)))
   );
@@ -115,6 +126,7 @@ export default function Dashboard() {
           {breached ? <ShieldAlert size={16} /> : <CheckCircle size={16} />}
           {breached ? t('dash_attention', { count: breached }) : t('dash_all_clear')}
         </p>
+        {dueSoon > 0 && <p className="dash-hero-alert soon"><Clock size={16} /> {t('dash_due_soon_alert', { count: dueSoon })}</p>}
       </div>
       <div className="dash-hero-actions">
         <Link to="/analytics" className="button light"><BarChart3 size={17} />{t('view_analytics')}</Link>
@@ -145,7 +157,13 @@ export default function Dashboard() {
           <Search size={17} />
           <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('dash_search')} aria-label={t('dash_search')} />
         </div>
-        <span className="dash-count">{t('dash_showing', { shown: filteredComplaints.length, total: complaints.length })}</span>
+        <div className="dash-quick">
+          <button type="button" className={`dash-quick-btn late ${slaFilter === 'overdue' ? 'active' : ''}`} aria-pressed={slaFilter === 'overdue'}
+            onClick={() => setSlaFilter(slaFilter === 'overdue' ? null : 'overdue')}><AlertTriangle size={14} /> {t('dash_filter_overdue', { count: breached })}</button>
+          <button type="button" className={`dash-quick-btn soon ${slaFilter === 'soon' ? 'active' : ''}`} aria-pressed={slaFilter === 'soon'}
+            onClick={() => setSlaFilter(slaFilter === 'soon' ? null : 'soon')}><Clock size={14} /> {t('dash_filter_soon', { count: dueSoon })}</button>
+          <span className="dash-count">{t('dash_showing', { shown: filteredComplaints.length, total: complaints.length })}</span>
+        </div>
       </div>
 
       <div className="table-filters">
@@ -197,6 +215,7 @@ export default function Dashboard() {
           <tbody>
             {filteredComplaints.map((c) => {
               const overdue = isBreached(c);
+              const soon = isDueSoon(c);
               const priority = c.priority || 'P4';
               const status = c.status || 'OPEN';
               return (
@@ -212,8 +231,8 @@ export default function Dashboard() {
                   <td>
                     {isClosed(c) ? <span className="sla-pill done"><CheckCircle size={13} /> {L.status(status)}</span>
                       : c.slaDeadline ? (
-                        <span className={`sla-pill ${overdue ? 'late' : 'ok'}`}>
-                          {overdue ? <AlertTriangle size={13} /> : <Clock size={13} />} {L.timeRemaining(c.slaDeadline)}
+                        <span className={`sla-pill ${overdue ? 'late' : soon ? 'soon' : 'ok'}`} title={soon ? t('dash_due_soon') : undefined}>
+                          {overdue ? <AlertTriangle size={13} /> : <Clock size={13} />} {soon && <b>{t('dash_due_soon')} ·</b>} {L.timeRemaining(c.slaDeadline)}
                         </span>
                       ) : <span className="sla-pill none">{L.sla('No SLA')}</span>}
                   </td>

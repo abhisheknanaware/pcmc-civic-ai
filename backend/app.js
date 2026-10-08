@@ -20,6 +20,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/meta', metaRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/kb', require('./routes/kbRoutes'));
 
 // Basic route
 app.get('/', (req, res) => {

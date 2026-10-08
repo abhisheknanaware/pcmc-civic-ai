@@ -12,6 +12,10 @@ const getTransporter = () => {
       port,
       secure: port === 465, // 587 upgrades to TLS with STARTTLS
       auth: { user: process.env.EMAIL_USER, pass: smtpPassword() },
+      // Fail fast on networks that block SMTP instead of hanging requests for two minutes.
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
     });
   }
   return transporter;

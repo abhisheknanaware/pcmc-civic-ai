@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square, ArrowLeft, MessageSquareText, History, Star, SlidersHorizontal } from 'lucide-react';
+import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square, ArrowLeft, MessageSquareText, History, Star, SlidersHorizontal, Camera, Upload } from 'lucide-react';
 import useLabels from '../hooks/useLabels';
 import { API_BASE, PRIORITIES, STATUSES } from '../constants';
 import api, { authFetch } from '../services/api';
@@ -26,6 +26,8 @@ export default function TicketDetails() {
   const [department, setDepartment] = useState('');
 
   const [isSaving, setIsSaving] = useState(false);
+  const [proofUploading, setProofUploading] = useState(false);
+  const [proofError, setProofError] = useState('');
   const [replyLanguage, setReplyLanguage] = useState('auto');
   const [streaming, setStreaming] = useState(false);
   const [replyMeta, setReplyMeta] = useState(null);
@@ -68,6 +70,25 @@ export default function TicketDetails() {
       console.error('Failed to fetch complaint:', error);
     } finally {
       if (!isPolling) setLoading(false);
+    }
+  };
+
+  const handleProofUpload = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { setProofError(t('proof_too_large')); return; }
+    setProofUploading(true);
+    setProofError('');
+    try {
+      const form = new FormData();
+      form.append('image', file);
+      const { data } = await api.post(`/complaints/${id}/resolution-photo`, form);
+      setComplaint((c) => ({ ...c, resolutionImageUrl: data.resolutionImageUrl, resolutionImageAt: data.resolutionImageAt }));
+    } catch (err) {
+      setProofError(err.response?.data?.message || t('proof_failed'));
+    } finally {
+      setProofUploading(false);
     }
   };
 
@@ -433,6 +454,22 @@ export default function TicketDetails() {
             <button className="btn btn-primary ticket-save" onClick={handleSave} disabled={isSaving}>
               {isSaving ? <RefreshCw size={16} className="spin" /> : <Save size={16} />} {t('save_changes')}
             </button>
+
+            <section className="proof-box">
+              <span className="time-box-label"><Camera size={14} /> {t('proof_title')}</span>
+              {complaint.resolutionImageUrl ? (
+                <a href={complaint.resolutionImageUrl} target="_blank" rel="noreferrer" className="proof-thumb">
+                  <img src={complaint.resolutionImageUrl} alt={t('proof_title')} />
+                  <span>{t('proof_uploaded', { date: L.date(complaint.resolutionImageAt || complaint.updatedAt, { dateStyle: 'medium' }) })}</span>
+                </a>
+              ) : <p className="form-note">{t('proof_hint')}</p>}
+              <label className={`btn btn-secondary proof-upload ${proofUploading ? 'is-busy' : ''}`}>
+                {proofUploading ? <Loader size={15} className="spin" /> : <Upload size={15} />}
+                {t(complaint.resolutionImageUrl ? 'proof_replace' : 'proof_upload')}
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/heic" hidden disabled={proofUploading} onChange={handleProofUpload} />
+              </label>
+              {proofError && <p className="chat-error">{proofError}</p>}
+            </section>
 
             <div className="metadata-list">
               <p><strong>{t('label_subcategory')}</strong>{complaint.subcategory || t('na')}</p>

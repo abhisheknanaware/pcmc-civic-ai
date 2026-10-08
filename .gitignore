@@ -26,3 +26,6 @@ nlp/data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local database backups (contain citizen data)
+backups/

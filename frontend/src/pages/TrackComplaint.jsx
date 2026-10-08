@@ -164,6 +164,25 @@ export default function TrackComplaint() {
                     </div>
                   ))}
                 </div>
+                {(result.imageUrl || result.resolutionImageUrl) && (
+                  <section className="before-after">
+                    <h4 className="detail-label">{t(result.resolutionImageUrl && result.imageUrl ? 'proof_before_after' : result.resolutionImageUrl ? 'proof_after_title' : 'evidence_photo')}</h4>
+                    <div className={`before-after-grid ${result.resolutionImageUrl && result.imageUrl ? 'pair' : ''}`}>
+                      {result.imageUrl && (
+                        <a href={result.imageUrl} target="_blank" rel="noreferrer" className="ba-photo">
+                          <img src={result.imageUrl} alt={t('proof_before')} />
+                          <span className="ba-tag before">{t('proof_before')}</span>
+                        </a>
+                      )}
+                      {result.resolutionImageUrl && (
+                        <a href={result.resolutionImageUrl} target="_blank" rel="noreferrer" className="ba-photo">
+                          <img src={result.resolutionImageUrl} alt={t('proof_after')} />
+                          <span className="ba-tag after">{t('proof_after')}</span>
+                        </a>
+                      )}
+                    </div>
+                  </section>
+                )}
                 {result.finalReply && (
                   <section className="track-reply">
                     <h4 className="detail-label">{t('resolution_note')}</h4>
