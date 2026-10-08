@@ -1,27 +1,36 @@
 const nodemailer = require('nodemailer');
 
+// SMTP settings from backend/.env. EMAIL_PASS is still accepted for older .env files.
+const smtpPassword = () => process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS || '';
+
+let transporter;
+const getTransporter = () => {
+  if (!transporter) {
+    const port = Number(process.env.EMAIL_PORT) || 587;
+    transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+      port,
+      secure: port === 465, // 587 upgrades to TLS with STARTTLS
+      auth: { user: process.env.EMAIL_USER, pass: smtpPassword() },
+    });
+  }
+  return transporter;
+};
+
+exports.smtpPassword = smtpPassword;
+
 exports.sendEmail = async (to, subject, text) => {
   try {
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    const info = await getTransporter().sendMail({
+      from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
       to,
       subject,
-      text
-    };
-
-    const info = await transporter.sendMail(mailOptions);
+      text,
+    });
     console.log('Email sent: ' + info.response);
     return info;
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error sending email:', error.message);
     throw error;
   }
 };

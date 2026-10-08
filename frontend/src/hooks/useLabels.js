@@ -34,9 +34,15 @@ export default function useLabels() {
     timeRemaining: (deadline) => {
       if (!deadline) return '';
       const diff = new Date(deadline) - new Date();
-      return t(diff > 0 ? 'time_left' : 'time_overdue', splitHours(diff));
+      const { h, m } = splitHours(diff);
+      // Beyond two days, "5d 10h" reads better than "130h 12m".
+      if (h >= 48) return t(diff > 0 ? 'time_left_days' : 'time_overdue_days', { d: Math.floor(h / 24), h: h % 24 });
+      return t(diff > 0 ? 'time_left' : 'time_overdue', { h, m });
     },
-    timeSince: (date) => t('time_ago', splitHours(new Date() - new Date(date))),
+    timeSince: (date) => {
+      const { h, m } = splitHours(new Date() - new Date(date));
+      return h >= 48 ? t('time_ago_days', { d: Math.floor(h / 24), h: h % 24 }) : t('time_ago', { h, m });
+    },
     date: (d, options = { day: 'numeric', month: 'short' }) => new Intl.DateTimeFormat(locale, options).format(new Date(d)),
   };
 }

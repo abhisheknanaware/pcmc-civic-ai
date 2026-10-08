@@ -8,7 +8,7 @@ const llmService = require('../services/llmService');
 const { sanitizePii } = require('../services/piiRedaction');
 const { pcmc, ZONE_IDS } = require('../services/pcmcConfig');
 const { nextTicketNumber, normalizeTicketNumber } = require('../services/ticketNumbers');
-const emailService = require('../services/emailService');
+const notifications = require('../services/notifications');
 const cloudinary = require('cloudinary').v2;
 const exifr = require('exifr');
 
@@ -18,8 +18,26 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_SECRET_KEY
 });
 
+const CLOSED_STATUSES = ['RESOLVED', 'CLOSED'];
+
+// Status timeline for the citizen. Complaints filed before history was recorded get a reconstructed one.
+const timeline = (c) => {
+  if (c.history?.length) return c.history.map(({ event, at }) => ({ event, at }));
+  const steps = [{ event: 'OPEN', at: c.createdAt }];
+  if (c.status && c.status !== 'OPEN') steps.push({ event: c.status, at: c.resolvedAt || c.updatedAt });
+  return steps;
+};
+
+// Feedback is asked once per resolution: after a reopen and a new resolution, the citizen can answer again.
+const canGiveFeedback = (c) => CLOSED_STATUSES.includes(c.status)
+  && (!c.feedback?.at || (c.resolvedAt && new Date(c.feedback.at) < new Date(c.resolvedAt)));
+
 // What a citizen may see about their own complaint (no officer notes, duplicates, AI drafts or other citizens' data).
 const citizenView = (c) => ({
+  timeline: timeline(c),
+  feedback: c.feedback?.at ? { resolved: c.feedback.resolved, rating: c.feedback.rating, at: c.feedback.at } : undefined,
+  canGiveFeedback: canGiveFeedback(c),
+  reopenCount: c.reopenCount || 0,
   ticketNumber: c.ticketNumber,
   status: c.status,
   category: c.category,
@@ -109,6 +127,7 @@ exports.createComplaint = async (req, res) => {
       },
       imageUrl,
       status: 'OPEN',
+      history: [{ event: 'OPEN' }],
       generatedReply: ""
     });
 
@@ -220,6 +239,7 @@ exports.createComplaint = async (req, res) => {
       });
 
       prepareAiDrafts(newComplaint._id);
+      notifications.complaintReceived(finalComplaint);
 
     } catch (processError) {
       console.error("Processing Error:", processError);
@@ -258,42 +278,36 @@ exports.updateComplaint = async (req, res) => {
       return res.status(400).json({ message: 'Invalid zone.' });
     }
 
-    // Record when a ticket is first closed so management analytics can measure resolution time.
-    if (updateData.status) {
-      const isClosed = ['RESOLVED', 'CLOSED'].includes(updateData.status);
-      const existing = await Complaint.findById(id).select('resolvedAt');
-      if (isClosed && !existing?.resolvedAt) updateData.resolvedAt = new Date();
+    const existing = await Complaint.findById(id).select('status resolvedAt createdAt history');
+    if (!existing) return res.status(404).json({ message: 'Complaint not found' });
+
+    const statusChanged = Boolean(updateData.status) && updateData.status !== existing.status;
+    const update = { $set: updateData };
+    if (statusChanged) {
+      // Record when a ticket is first closed so management analytics can measure resolution time.
+      const isClosed = CLOSED_STATUSES.includes(updateData.status);
+      if (isClosed && !existing.resolvedAt) updateData.resolvedAt = new Date();
       if (!isClosed) updateData.resolvedAt = null;
+      // Complaints filed before history was recorded get their "Reported" step first.
+      const seed = existing.history?.length ? [] : [{ event: 'OPEN', at: existing.createdAt }];
+      update.$push = { history: { $each: [...seed, { event: updateData.status, at: new Date() }] } };
     }
 
-    // Allow updating status, priority, department, finalReply, etc.
-    const updatedComplaint = await Complaint.findByIdAndUpdate(id, updateData, { new: true });
+    const updatedComplaint = await Complaint.findByIdAndUpdate(id, update, { new: true });
 
-    if (!updatedComplaint) {
-      return res.status(404).json({ message: 'Complaint not found' });
+    // One email per save: the officer's reply (with the new status) or, without a reply, the status change alone.
+    const reply = sendEmail && updatedComplaint.finalReply ? updatedComplaint.finalReply : null;
+    let email = { sent: false };
+    if (reply || statusChanged) {
+      email = await notifications.statusChanged(updatedComplaint, statusChanged ? updatedComplaint.status : null, reply);
     }
-
-    // Send email if requested
-    if (sendEmail && updatedComplaint.userEmail && updatedComplaint.finalReply) {
-      console.log("Sending email via Nodemailer...");
-      try {
-        await emailService.sendEmail(
-          updatedComplaint.userEmail,
-          `PCMC Complaint ${updatedComplaint.ticketNumber || updatedComplaint._id.toString().slice(-6)} Update`,
-          updatedComplaint.finalReply
-        );
-      } catch (emailError) {
-        console.error("Failed to send email to customer:", emailError);
-        return res.status(200).json({
-          ...updatedComplaint.toObject(),
-          emailSent: false,
-          emailError: 'Ticket updated, but failed to send email. Please check your Gmail credentials in .env.'
-        });
-      }
-      return res.json({ ...updatedComplaint.toObject(), emailSent: true });
-    }
-
-    res.json({ ...updatedComplaint.toObject(), emailSent: false });
+    res.json({
+      ...updatedComplaint.toObject(),
+      emailSent: email.sent,
+      ...(reply && !email.sent ? { emailError: email.reason === 'email_not_configured'
+        ? 'Ticket updated. Email is not configured yet (set EMAIL_USER / EMAIL_PASSWORD in backend/.env).'
+        : 'Ticket updated, but the email could not be sent. Please check the Gmail credentials in backend/.env.' } : {}),
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -423,5 +437,46 @@ exports.getComplaintStatus = async (req, res) => {
     res.json(citizenView(complaint));
   } catch (error) {
     res.status(500).json({ message: 'Could not look up the complaint.' });
+  }
+};
+
+// Public: after resolution the citizen answers "Was this fixed?" (same ticket + email ownership check).
+// "Not fixed" reopens the complaint with a fresh SLA deadline so it returns to the officer's queue.
+exports.submitFeedback = async (req, res) => {
+  const ticketNumber = normalizeTicketNumber(req.body?.ticketNumber);
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const resolved = req.body?.resolved;
+  const rating = req.body?.rating == null ? undefined : Number(req.body.rating);
+  if (!ticketNumber || !email || typeof resolved !== 'boolean') {
+    return res.status(400).json({ message: 'Ticket number, email and an answer are required.' });
+  }
+  if (rating !== undefined && !(Number.isInteger(rating) && rating >= 1 && rating <= 5)) {
+    return res.status(400).json({ message: 'Rating must be between 1 and 5.' });
+  }
+  try {
+    const complaint = await Complaint.findOne({ ticketNumber });
+    if (!complaint || complaint.userEmail.trim().toLowerCase() !== email) {
+      return res.status(404).json({ message: 'No complaint found for this ticket number and email.' });
+    }
+    if (!canGiveFeedback(complaint)) {
+      return res.status(409).json({ message: 'Feedback can be given once the complaint is resolved.' });
+    }
+
+    const comment = sanitizePii(String(req.body?.comment || '').trim().slice(0, 500), { name: complaint.userName, email: complaint.userEmail });
+    complaint.feedback = { resolved, rating, comment: comment || undefined, at: new Date() };
+    if (!resolved) {
+      complaint.status = 'OPEN';
+      complaint.resolvedAt = null;
+      complaint.slaDeadline = calculateSLA(complaint.priority);
+      complaint.reopenCount = (complaint.reopenCount || 0) + 1;
+      if (!complaint.history.length) complaint.history.push(...timeline(complaint));
+      complaint.history.push({ event: 'REOPENED', at: new Date() });
+    }
+    await complaint.save();
+    if (!resolved) notifications.statusChanged(complaint, 'REOPENED');
+    res.json({ reopened: !resolved, complaint: citizenView(complaint) });
+  } catch (error) {
+    console.error('Feedback error:', error.message);
+    res.status(500).json({ message: 'Could not save your feedback.' });
   }
 };

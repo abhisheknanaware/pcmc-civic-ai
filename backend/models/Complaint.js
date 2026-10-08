@@ -98,7 +98,21 @@ const complaintSchema = new mongoose.Schema({
   assignedTo: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  }
+  },
+  // Every status change (and citizen reopening), shown to the citizen as a timeline.
+  history: [{
+    _id: false,
+    event: { type: String, enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_FOR_CUSTOMER', 'RESOLVED', 'CLOSED', 'REOPENED'] },
+    at: { type: Date, default: Date.now },
+  }],
+  // The citizen's answer to "Was this fixed?" after resolution. "Not fixed" reopens the complaint.
+  feedback: {
+    resolved: Boolean,
+    rating: { type: Number, min: 1, max: 5 },
+    comment: { type: String, maxlength: 500 },
+    at: Date,
+  },
+  reopenCount: { type: Number, default: 0 }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Complaint', complaintSchema);

@@ -12,6 +12,7 @@ import TicketDetails from './pages/TicketDetails';
 import Analytics from './pages/Analytics';
 import MapView from './pages/MapView';
 import ChatWidget from './components/ChatWidget';
+import AskPcmc from './pages/AskPcmc';
 import Skyline from './components/Skyline';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MetaProvider, useMeta } from './context/MetaContext';
@@ -52,7 +53,7 @@ function Shell() {
 
   return (
     <div className={`app-shell ${pathname === '/' ? 'is-home' : ''}`}>
-      <header className={`site-header ${scrolled ? 'scrolled' : ''} ${menuOpen ? 'menu-open' : ''}`}>
+      <header className={`site-header ${scrolled ? 'scrolled' : ''} ${menuOpen ? 'menu-open' : ''} ${officer ? 'is-officer' : ''}`}>
         <nav className="navbar">
           <Link className="brand" to="/" aria-label={t('brand')}>
             <Logo />
@@ -64,6 +65,7 @@ function Shell() {
             <NavLink to="/" end>{t('nav_home')}</NavLink>
             <NavLink to="/report">{t('nav_submit')}</NavLink>
             <NavLink to="/track">{t('nav_track')}</NavLink>
+            <NavLink to="/ask">{t('nav_ask')}</NavLink>
             {officer && (
               <>
                 <NavLink to="/dashboard">{t('nav_dashboard')}</NavLink>
@@ -84,8 +86,8 @@ function Shell() {
             </label>
 
             {officer ? (
-              <button type="button" className="nav-auth" onClick={logout} title={officer.email}>
-                <LogOut size={14} /> {t('logout')}
+              <button type="button" className="nav-auth nav-logout" onClick={logout} title={`${t('logout')} (${officer.email})`} aria-label={t('logout')}>
+                <LogOut size={15} /> <span className="nav-auth-text">{t('logout')}</span>
               </button>
             ) : (
               <NavLink to="/login" className="nav-auth"><LogIn size={14} /> {t('officer_login')}</NavLink>
@@ -99,6 +101,7 @@ function Shell() {
           <Route path="/" element={<Home />} />
           <Route path="/report" element={<SubmitComplaint />} />
           <Route path="/track" element={<TrackComplaint />} />
+          <Route path="/ask" element={<AskPcmc />} />
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<OfficerRoute><Dashboard /></OfficerRoute>} />
           <Route path="/map" element={<OfficerRoute><MapView /></OfficerRoute>} />
@@ -117,6 +120,7 @@ function Shell() {
           <nav className="footer-links">
             <Link to="/report">{t('nav_submit')}</Link>
             <Link to="/track">{t('nav_track')}</Link>
+            <Link to="/ask">{t('nav_ask')}</Link>
             <a href={`tel:${corporation?.sarathiHelpline || '8888006666'}`}>Sarathi {corporation?.sarathiHelpline || '8888006666'}</a>
             {corporation?.website && <a href={corporation.website} target="_blank" rel="noreferrer">pcmcindia.gov.in</a>}
           </nav>

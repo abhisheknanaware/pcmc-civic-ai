@@ -116,6 +116,10 @@ exports.getAnalytics = async (req, res) => {
               negative: { $sum: { $cond: ['$isNegative', 1, 0] } },
               avgResolutionHours: { $avg: '$resolutionHours' },
               avgConfidence: { $avg: '$categoryConfidence' },
+              feedbackCount: { $sum: { $cond: [{ $ne: [{ $ifNull: ['$feedback.at', null] }, null] }, 1, 0] } },
+              feedbackFixed: { $sum: { $cond: [{ $eq: ['$feedback.resolved', true] }, 1, 0] } },
+              avgRating: { $avg: '$feedback.rating' },
+              reopened: { $sum: { $cond: [{ $gt: [{ $ifNull: ['$reopenCount', 0] }, 0] }, 1, 0] } },
             },
           }],
           received: [
@@ -204,6 +208,10 @@ exports.getAnalytics = async (req, res) => {
         duplicateRate: pct(s.duplicates, s.total),
         negativeShare: pct(s.negative, s.total),
         avgAiConfidence: s.avgConfidence == null ? null : pct(s.avgConfidence, 1),
+        feedbackCount: s.feedbackCount || 0,
+        confirmedFixedRate: s.feedbackCount ? pct(s.feedbackFixed, s.feedbackCount) : null,
+        avgRating: s.avgRating == null ? null : Math.round(s.avgRating * 10) / 10,
+        reopened: s.reopened || 0,
       },
       trend,
       departmentPerformance: result.departments.map((d) => ({

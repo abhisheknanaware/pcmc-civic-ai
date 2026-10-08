@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus } = require('../controllers/complaintController');
+const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus, submitFeedback } = require('../controllers/complaintController');
 const { protect, admin } = require('../middleware/authMiddleware');
 const rateLimit = require('../middleware/rateLimit');
 
@@ -19,6 +19,7 @@ const upload = multer({ storage });
 // Citizen (public) endpoints
 router.post('/', rateLimit({ windowMs: 60 * 60 * 1000, max: 20 }), upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'image', maxCount: 1 }]), createComplaint);
 router.post('/status', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), getComplaintStatus);
+router.post('/feedback', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), submitFeedback);
 
 // Officer endpoints
 router.get('/', protect, getComplaints);

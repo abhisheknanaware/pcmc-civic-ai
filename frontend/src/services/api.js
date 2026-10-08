@@ -49,4 +49,9 @@ export const getComplaintStatus = async (ticketNumber, email) => {
   return response.data;
 };
 
+export const submitFeedback = async (payload) => {
+  const response = await api.post('/complaints/feedback', payload);
+  return response.data;
+};
+
 export default api;

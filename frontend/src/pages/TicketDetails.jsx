@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square } from 'lucide-react';
+import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square, ArrowLeft, MessageSquareText, History, Star, SlidersHorizontal } from 'lucide-react';
 import useLabels from '../hooks/useLabels';
 import { API_BASE, PRIORITIES, STATUSES } from '../constants';
 import api, { authFetch } from '../services/api';
 import { useMeta } from '../context/MetaContext';
+import ComplaintTimeline from '../components/ComplaintTimeline';
 
 const shortId = (id) => id.slice(-6);
 const GENERATING = 'Generating smart reply...';
@@ -173,8 +174,17 @@ export default function TicketDetails() {
   const hasReply = editedReply && !backgroundDrafting;
   const draftLanguage = replyMeta?.language || complaint.replyLanguage;
 
+  const closed = ['RESOLVED', 'CLOSED'].includes(complaint.status);
+  const priorityKey = (complaint.priority || 'P4').toLowerCase();
+  const timelineSteps = complaint.history?.length ? complaint.history
+    : [{ event: 'OPEN', at: complaint.createdAt }, ...(complaint.status && complaint.status !== 'OPEN' ? [{ event: complaint.status, at: complaint.resolvedAt || complaint.updatedAt }] : [])];
+  // Extracted entities as readable chips (skip empty values; lists joined).
+  const entityChips = Object.entries(complaint.entities || {})
+    .map(([key, value]) => [key, Array.isArray(value) ? value.filter(Boolean).join(', ') : (value && typeof value === 'object' ? Object.values(value).filter(Boolean).join(', ') : value)])
+    .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '');
+
   return (
-    <div className="page-container ticket-detail-page" style={{ maxWidth: '1120px' }}>
+    <div className="page-container ticket-detail-page">
       <header className="page-header">
         <div>
           <p className="eyebrow">{t('ticket_eyebrow')}</p>
@@ -182,7 +192,7 @@ export default function TicketDetails() {
           <p className="page-subtitle">{t('submitted_by', { name: complaint.userName, email: complaint.userEmail })}</p>
         </div>
         <div className="flex gap-2 header-actions">
-          <button className="btn btn-secondary" onClick={() => navigate('/dashboard')}>{t('back_workspace')}</button>
+          <button className="btn btn-secondary" onClick={() => navigate('/dashboard')}><ArrowLeft size={16} /> {t('back_workspace')}</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
             {isSaving ? <RefreshCw size={16} className="spin" /> : <Save size={16} />}
             {t('save_changes')}
@@ -190,10 +200,43 @@ export default function TicketDetails() {
         </div>
       </header>
 
-      <div className="split-layout">
+      <section className="ticket-summary" aria-label={t('ticket_metadata')}>
+        <div className="ticket-summary-item">
+          <span>{t('label_status')}</span>
+          <strong className={`status-chip tone-${closed ? 'green' : complaint.status === 'IN_PROGRESS' ? 'amber' : 'sky'}`}>{L.status(complaint.status || 'OPEN')}</strong>
+        </div>
+        <div className="ticket-summary-item">
+          <span>{t('label_priority')}</span>
+          <strong className={`prio-chip prio-${priorityKey}`}>{L.priority(complaint.priority || 'P4')}</strong>
+        </div>
+        <div className="ticket-summary-item wide">
+          <span>{t('label_category')}</span>
+          <strong>{L.category(complaint.category)}</strong>
+        </div>
+        <div className="ticket-summary-item wide">
+          <span>{t('label_department')}</span>
+          <strong>{L.department(complaint.department, t('general'))}</strong>
+        </div>
+        <div className="ticket-summary-item">
+          <span>{t('label_zone')}</span>
+          <strong>{complaint.zone ? <><span className="zone-dot">{complaint.zone}</span> {zones[complaint.zone]?.name}</> : t('zone_unknown')}</strong>
+        </div>
+        <div className="ticket-summary-item">
+          <span>{t(closed ? 'label_status' : slaMissed ? 'deadline_missed' : 'on_track_caps')}</span>
+          {closed ? <strong className="sla-pill done"><Clock size={13} /> {L.date(complaint.resolvedAt || complaint.updatedAt, { dateStyle: 'medium' })}</strong>
+            : complaint.slaDeadline ? <strong className={`sla-pill ${slaMissed ? 'late' : 'ok'}`}><Clock size={13} /> {L.timeRemaining(complaint.slaDeadline)}</strong>
+            : <strong className="sla-pill none">{L.sla('No SLA')}</strong>}
+        </div>
+        <div className="ticket-summary-item">
+          <span>{t('time_since_reported')}</span>
+          <strong className="ticket-summary-muted">{L.timeSince(complaint.createdAt)}</strong>
+        </div>
+      </section>
+
+      <div className="split-layout ticket-layout">
         <div className="stack">
           <div className="card">
-            <h3 className="card-title">{t('original_request')}</h3>
+            <h3 className="card-title"><MessageSquareText size={18} color="var(--primary)" /> {t('original_request')}</h3>
             <p className="request-copy">{complaint.originalText}</p>
 
             {showTranslation && (
@@ -291,16 +334,51 @@ export default function TicketDetails() {
               </>
             ) : (
               <div className="reply-placeholder">
+                <Bot size={26} color="var(--primary)" />
                 <p>{t('no_reply')}</p>
                 <p className="form-note">{t('reply_hint')}</p>
               </div>
             )}
           </div>
+
+          <div className="ticket-pair">
+            <div className="card">
+              <h3 className="card-title"><History size={18} color="var(--primary)" /> {t('timeline_title')}</h3>
+              <ComplaintTimeline timeline={timelineSteps} status={complaint.status} />
+            </div>
+
+            <div className="card">
+              <h3 className="card-title"><Star size={18} color="var(--accent)" /> {t('feedback_citizen')}</h3>
+              <div className="officer-feedback">
+                {complaint.feedback?.at ? (
+                  <>
+                    <p className={`feedback-verdict ${complaint.feedback.resolved ? 'yes' : 'no'}`}>
+                      {t(complaint.feedback.resolved ? 'feedback_given_yes' : 'feedback_given_no')}
+                      {complaint.feedback.rating ? <span className="feedback-stars">{'★'.repeat(complaint.feedback.rating)}{'☆'.repeat(5 - complaint.feedback.rating)}</span> : null}
+                    </p>
+                    {complaint.feedback.comment && <p className="request-copy">{complaint.feedback.comment}</p>}
+                  </>
+                ) : <p className="form-note">{t('feedback_none')}</p>}
+                {complaint.reopenCount > 0 && <p className="feedback-warn">{t('feedback_reopened_count', { count: complaint.reopenCount })}</p>}
+              </div>
+
+              <h4 className="detail-label entity-heading">{t('extracted_entities')}</h4>
+              {entityChips.length > 0 ? (
+                <div className="entity-chips">
+                  {entityChips.map(([key, value]) => (
+                    <span key={key} className="entity-chip"><b>{key.replace(/_/g, ' ')}</b>{String(value)}</span>
+                  ))}
+                </div>
+              ) : (
+                <p className="form-note">{t('no_entities')}</p>
+              )}
+            </div>
+          </div>
         </div>
 
-        <div className="stack">
+        <aside className="stack ticket-side">
           <div className="card">
-            <h3 className="card-title">{t('ticket_metadata')}</h3>
+            <h3 className="card-title"><SlidersHorizontal size={18} color="var(--primary)" /> {t('ticket_metadata')}</h3>
 
             {complaint.duplicates && complaint.duplicates.length > 0 && (
               <div className="duplicate-alert">
@@ -325,37 +403,38 @@ export default function TicketDetails() {
               </div>
             )}
 
-            <div className="form-group">
-              <label htmlFor="ticket-status">{t('label_status')}</label>
-              <select id="ticket-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-                {STATUSES.map(s => <option key={s} value={s}>{L.status(s)}</option>)}
-              </select>
+            <div className="ticket-controls">
+              <div className="form-group">
+                <label htmlFor="ticket-status">{t('label_status')}</label>
+                <select id="ticket-status" value={status} onChange={(e) => setStatus(e.target.value)}>
+                  {STATUSES.map(s => <option key={s} value={s}>{L.status(s)}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="ticket-priority">{t('label_priority')}</label>
+                <select id="ticket-priority" value={priority} onChange={(e) => setPriority(e.target.value)}>
+                  {PRIORITIES.map(p => <option key={p} value={p}>{L.priority(p)}</option>)}
+                </select>
+              </div>
+              <div className="form-group full">
+                <label htmlFor="ticket-department">{t('label_department')}</label>
+                <select id="ticket-department" value={department} onChange={(e) => setDepartment(e.target.value)}>
+                  {departmentOptions.map(d => <option key={d} value={d}>{L.department(d)}</option>)}
+                </select>
+              </div>
+              <div className="form-group full">
+                <label htmlFor="ticket-zone">{t('label_zone')}</label>
+                <select id="ticket-zone" value={zone} onChange={(e) => setZone(e.target.value)}>
+                  <option value="">{t('zone_unknown')}</option>
+                  {Object.entries(zones).map(([zid, z]) => <option key={zid} value={zid}>{zid} – {z.name}</option>)}
+                </select>
+              </div>
             </div>
-
-            <div className="form-group">
-              <label htmlFor="ticket-priority">{t('label_priority')}</label>
-              <select id="ticket-priority" value={priority} onChange={(e) => setPriority(e.target.value)}>
-                {PRIORITIES.map(p => <option key={p} value={p}>{L.priority(p)}</option>)}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="ticket-department">{t('label_department')}</label>
-              <select id="ticket-department" value={department} onChange={(e) => setDepartment(e.target.value)}>
-                {departmentOptions.map(d => <option key={d} value={d}>{L.department(d)}</option>)}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="ticket-zone">{t('label_zone')}</label>
-              <select id="ticket-zone" value={zone} onChange={(e) => setZone(e.target.value)}>
-                <option value="">{t('zone_unknown')}</option>
-                {Object.entries(zones).map(([zid, z]) => <option key={zid} value={zid}>{zid} – {z.name}</option>)}
-              </select>
-            </div>
+            <button className="btn btn-primary ticket-save" onClick={handleSave} disabled={isSaving}>
+              {isSaving ? <RefreshCw size={16} className="spin" /> : <Save size={16} />} {t('save_changes')}
+            </button>
 
             <div className="metadata-list">
-              <p><strong>{t('label_category')}</strong>{L.category(complaint.category)}</p>
               <p><strong>{t('label_subcategory')}</strong>{complaint.subcategory || t('na')}</p>
               <p><strong>{t('label_ward')}</strong>{complaint.ward && complaint.ward !== 'Unknown Ward' ? complaint.ward : t('unknown')}</p>
               <p><strong>{t('label_location')}</strong>{complaint.location?.locality || complaint.location?.address || t('not_specified')}</p>
@@ -363,41 +442,8 @@ export default function TicketDetails() {
               <p><strong>{t('label_sentiment')}</strong>{L.sentiment(complaint.sentiment || 'Neutral')}</p>
               <p><strong>{t('label_urgency')}</strong>{L.urgency(complaint.urgency)}</p>
             </div>
-
-            {complaint.slaDeadline && (
-              <div className={`time-box ${slaMissed ? 'danger' : 'success'}`}>
-                 <Clock size={16} />
-                 <div>
-                   <span className="time-box-label">{t(slaMissed ? 'deadline_missed' : 'on_track_caps')}</span>
-                   <span className="time-box-value">{L.timeRemaining(complaint.slaDeadline)}</span>
-                 </div>
-              </div>
-            )}
-
-            {complaint.createdAt && (
-              <div className="time-box">
-                 <Clock size={16} />
-                 <div>
-                   <span className="time-box-label">{t('time_since_reported')}</span>
-                   <span className="time-box-value">{L.timeSince(complaint.createdAt)}</span>
-                 </div>
-              </div>
-            )}
           </div>
-
-          <div className="card">
-            <h3 className="card-title">{t('extracted_entities')}</h3>
-            {complaint.entities && Object.keys(complaint.entities).length > 0 ? (
-              <ul className="entity-list">
-                {Object.entries(complaint.entities).map(([key, value]) => (
-                  <li key={key}><strong>{key}:</strong> {JSON.stringify(value)}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="form-note">{t('no_entities')}</p>
-            )}
-          </div>
-        </div>
+        </aside>
       </div>
     </div>
   );

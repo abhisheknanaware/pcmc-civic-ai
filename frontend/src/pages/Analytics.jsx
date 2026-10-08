@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Loader, Download, Inbox, Clock, CheckCircle, Timer, ShieldCheck, AlertOctagon,
-  AlertTriangle, Copy, Frown, Cpu, ChevronRight, MessageCircle, MessagesSquare, FilePlus, Search, MousePointerClick
+  AlertTriangle, Copy, Frown, Cpu, ChevronRight, MessageCircle, MessagesSquare, FilePlus, Search, MousePointerClick, Star, ThumbsUp, RotateCcw
 } from 'lucide-react';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend,
@@ -156,6 +156,10 @@ export default function Analytics() {
         <KpiTile icon={Copy} label={t('kpi_duplicates')} value={L.percent(k.duplicateRate)} />
         <KpiTile icon={Frown} label={t('kpi_negative')} value={L.percent(k.negativeShare)} />
         <KpiTile icon={Cpu} label={t('kpi_ai_confidence')} value={L.percent(k.avgAiConfidence)} />
+        <KpiTile icon={Star} tone={k.avgRating >= 4 ? 'success' : k.avgRating && k.avgRating < 3 ? 'critical' : ''} label={t('kpi_avg_rating')}
+          value={k.avgRating == null ? '—' : `${L.number(k.avgRating, { maximumFractionDigits: 1 })} / 5`} hint={t('kpi_hint_feedback', { count: L.number(k.feedbackCount || 0) })} />
+        <KpiTile icon={ThumbsUp} tone="success" label={t('kpi_confirmed_fixed')} value={k.confirmedFixedRate == null ? '—' : L.percent(k.confirmedFixedRate)} hint={t('kpi_hint_confirmed')} />
+        <KpiTile icon={RotateCcw} tone={k.reopened ? 'warning' : ''} label={t('kpi_reopened')} value={L.number(k.reopened || 0)} hint={t('kpi_hint_reopened')} />
       </section>
 
       <ChartCard className="chart-wide" title={t('chart_trend')} subtitle={t('chart_trend_sub', { days: data.filters.trendDays })} empty={!hasTrend} emptyText={t('no_data')}>
