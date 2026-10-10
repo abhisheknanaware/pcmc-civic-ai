@@ -41,6 +41,40 @@ exports.reviewDocument = async (req, res) => {
   }
 };
 
+const questionKey = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+// GET /api/kb/answers - answers written by officers (used by the chatbot as verified information).
+exports.listAnswers = async (req, res) => {
+  try {
+    res.json(await nlp('/kb/answers'));
+  } catch (error) {
+    res.status(502).json({ message: 'Could not reach the chatbot service.' });
+  }
+};
+
+// POST /api/kb/answers - create or update an officer answer (admins only).
+exports.saveAnswer = async (req, res) => {
+  const { id, title, answer, questions, department, topic, sourceUrl, serviceUrl, serviceLabel } = req.body || {};
+  try {
+    const saved = await nlp('/kb/answers', {
+      method: 'POST',
+      body: JSON.stringify({ id, title, answer, questions: Array.isArray(questions) ? questions : [], department, topic, sourceUrl, serviceUrl, serviceLabel, author: req.user.email }),
+    });
+    res.json(saved);
+  } catch (error) {
+    res.status(error.status === 400 || error.status === 422 ? 400 : 502).json({ message: error.status === 422 ? 'Please fill in the title and answer.' : error.message });
+  }
+};
+
+// DELETE /api/kb/answers/:id (admins only).
+exports.deleteAnswer = async (req, res) => {
+  try {
+    res.json(await nlp(`/kb/answers/${encodeURIComponent(req.params.id)}`, { method: 'DELETE' }));
+  } catch (error) {
+    res.status(error.status === 404 ? 404 : 502).json({ message: error.message });
+  }
+};
+
 // GET /api/kb/unanswered - questions the assistant could not answer from verified sources, most frequent first.
 exports.unansweredQuestions = async (req, res) => {
   try {
@@ -51,7 +85,7 @@ exports.unansweredQuestions = async (req, res) => {
       session.messages.forEach((m, i) => {
         const reply = session.messages[i + 1];
         if (m.role !== 'user' || reply?.role !== 'assistant' || reply.answered !== false) return;
-        const key = m.content.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        const key = questionKey(m.content);
         if (!key) return;
         const group = groups.get(key) || { question: m.content.slice(0, 200), count: 0, topic: m.topic, language: m.language, lastAsked: null };
         group.count += 1;
@@ -60,7 +94,13 @@ exports.unansweredQuestions = async (req, res) => {
         groups.set(key, group);
       });
     }
-    const questions = [...groups.values()].sort((a, b) => b.count - a.count || new Date(b.lastAsked) - new Date(a.lastAsked)).slice(0, 50);
+    // Questions an officer has since answered are marked, so the list shows what is still open.
+    const answered = new Set();
+    try {
+      (await nlp('/kb/answers')).answers.forEach((a) => (a.questions || []).forEach((q) => answered.add(questionKey(q))));
+    } catch { /* chatbot service down: show the list without the marks */ }
+    groups.forEach((group, key) => { group.handled = answered.has(key); });
+    const questions = [...groups.values()].sort((a, b) => Number(a.handled) - Number(b.handled) || b.count - a.count || new Date(b.lastAsked) - new Date(a.lastAsked)).slice(0, 50);
     res.json({ questions });
   } catch (error) {
     res.status(500).json({ message: 'Could not load unanswered questions.' });

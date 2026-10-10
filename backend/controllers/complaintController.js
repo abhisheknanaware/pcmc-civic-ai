@@ -56,6 +56,28 @@ const citizenView = (c) => ({
 });
 exports.citizenView = citizenView;
 
+// Ask the NLP service which category a photo shows (CLIP). Returns null if unavailable.
+async function classifyImage(buffer, type = 'image/jpeg') {
+  try {
+    const form = new FormData();
+    form.append('image', new Blob([buffer], { type }), 'photo.jpg');
+    const nlpBase = new URL(process.env.NLP_SERVICE_URL || 'http://localhost:8000/process').origin;
+    const response = await fetch(`${nlpBase}/classify-image`, { method: 'POST', body: form, signal: AbortSignal.timeout(30000) });
+    return response.ok ? await response.json() : null;
+  } catch (error) {
+    console.error('Photo classification failed:', error.message);
+    return null;
+  }
+}
+
+// POST /api/complaints/classify-image (public) — instant "looks like: Road & Potholes" hint on the report form.
+exports.classifyPhoto = async (req, res) => {
+  if (!req.file?.buffer?.length) return res.status(400).json({ message: 'Please choose an image.' });
+  const result = await classifyImage(req.file.buffer, req.file.mimetype);
+  if (!result) return res.status(502).json({ message: 'Could not analyse the photo.' });
+  res.json(result);
+};
+
 // Target response times per priority live in config/pcmc.json (also shown on the homepage).
 const calculateSLA = (priority) => {
   const hoursToAdd = pcmc.slaHours[priority] || pcmc.slaHours.P3;
@@ -77,6 +99,7 @@ exports.createComplaint = async (req, res) => {
     }
 
     let imageUrl = null;
+    let imageBuffer = null; // kept in memory for the photo classifier; the file itself is deleted after upload
     let exifLat = null;
     let exifLng = null;
 
@@ -95,6 +118,7 @@ exports.createComplaint = async (req, res) => {
          console.log("Could not extract EXIF data:", exifErr.message);
        }
 
+       imageBuffer = fs.readFileSync(imagePath);
        const result = await cloudinary.uploader.upload(imagePath, { folder: 'pmc_complaints' });
        imageUrl = result.secure_url;
        fs.unlinkSync(imagePath); // remove from local
@@ -168,6 +192,18 @@ exports.createComplaint = async (req, res) => {
           ward: 'Unknown Ward',
           entities: {}
         };
+      }
+
+      // Photo-only complaints (or text the classifier could not place) take their category from the photo.
+      const weakText = !complaint || nlpResult.category === 'Other / General' || (nlpResult.categoryConfidence ?? 1) < 0.3;
+      if (imageBuffer && weakText) {
+        const fromPhoto = await classifyImage(imageBuffer);
+        if (fromPhoto?.category && fromPhoto.confidence >= 0.5 && pcmc.categoryRouting[fromPhoto.category]) {
+          nlpResult.category = fromPhoto.category;
+          nlpResult.categoryConfidence = fromPhoto.confidence;
+          nlpResult.department = pcmc.categoryRouting[fromPhoto.category].department;
+          console.log(`Category from photo: ${fromPhoto.category} (${fromPhoto.confidence})`);
+        }
       }
 
       const sanitizedText = sanitizePii(nlpResult.sanitizedText || complaint || 'Audio uploaded', { name, email });
@@ -313,6 +349,74 @@ exports.updateComplaint = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+// ---------- Nearby complaints and "Me too" (public) ----------
+const crypto = require('crypto');
+const NEARBY_RADIUS_M = 500;
+const distanceM = (lat1, lng1, lat2, lng2) => {
+  const rad = (d) => (d * Math.PI) / 180;
+  const a = Math.sin(rad(lat2 - lat1) / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(rad(lng2 - lng1) / 2) ** 2;
+  return 6371000 * 2 * Math.asin(Math.sqrt(a));
+};
+const supporterHash = (email) => crypto.createHmac('sha256', process.env.JWT_SECRET || 'pcmc-civic')
+  .update(String(email).trim().toLowerCase()).digest('hex');
+
+// GET /api/complaints/nearby?lat=&lng= — open complaints within 500 m. Category, status and an approximate
+// (~100 m) position only: no text, names, photos or exact addresses.
+exports.getNearbyComplaints = async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return res.status(400).json({ message: 'Valid lat and lng are required.' });
+  }
+  try {
+    const dLat = NEARBY_RADIUS_M / 111320;
+    const dLng = NEARBY_RADIUS_M / (111320 * Math.cos((lat * Math.PI) / 180));
+    const candidates = await Complaint.find({
+      status: { $nin: CLOSED_STATUSES },
+      category: { $ne: 'Processing...' },
+      'location.latitude': { $gte: lat - dLat, $lte: lat + dLat },
+      'location.longitude': { $gte: lng - dLng, $lte: lng + dLng },
+    }).select('ticketNumber category status supportCount createdAt location.latitude location.longitude').limit(100);
+    const nearby = candidates
+      .map((c) => ({ c, d: distanceM(lat, lng, c.location.latitude, c.location.longitude) }))
+      .filter(({ d }) => d <= NEARBY_RADIUS_M)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 10)
+      .map(({ c, d }) => ({
+        ticketNumber: c.ticketNumber, category: c.category, status: c.status, createdAt: c.createdAt,
+        distanceM: Math.round(d / 10) * 10, affected: (c.supportCount || 0) + 1,
+        lat: Math.round(c.location.latitude * 1000) / 1000, lng: Math.round(c.location.longitude * 1000) / 1000,
+      }));
+    res.json({ nearby });
+  } catch (error) {
+    res.status(500).json({ message: 'Could not look up nearby complaints.' });
+  }
+};
+
+// POST /api/complaints/support { ticketNumber, email } — "this affects me too", once per email.
+exports.supportComplaint = async (req, res) => {
+  const ticketNumber = normalizeTicketNumber(req.body?.ticketNumber);
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!ticketNumber || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'A ticket number and a valid email are required.' });
+  }
+  try {
+    const complaint = await Complaint.findOne({ ticketNumber }).select('userEmail status supporters supportCount');
+    if (!complaint || CLOSED_STATUSES.includes(complaint.status)) return res.status(404).json({ message: 'This complaint is not open any more.' });
+    if (complaint.userEmail.trim().toLowerCase() === email) return res.status(409).json({ message: 'own_complaint' });
+    const emailHash = supporterHash(email);
+    // Atomic: only adds the vote if this email has not supported the complaint before.
+    const updated = await Complaint.findOneAndUpdate(
+      { _id: complaint._id, 'supporters.emailHash': { $ne: emailHash } },
+      { $push: { supporters: { emailHash } }, $inc: { supportCount: 1 } },
+      { new: true, projection: { supportCount: 1 } });
+    if (!updated) return res.status(409).json({ message: 'already_supported', affected: (complaint.supportCount || 0) + 1 });
+    res.json({ ticketNumber, affected: updated.supportCount + 1 });
+  } catch (error) {
+    res.status(500).json({ message: 'Could not record your support.' });
   }
 };
 

@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { Send, AlertCircle, Loader, MapPin, CheckCircle, Search } from 'lucide-react';
+import { Send, AlertCircle, Loader, MapPin, CheckCircle, Search, Sparkles } from 'lucide-react';
 import VoiceUpload from '../components/VoiceUpload';
 import WebcamUpload from '../components/WebcamUpload';
-import { submitComplaint } from '../services/api';
+import LocationPicker from '../components/LocationPicker';
+import api, { submitComplaint } from '../services/api';
+import useLabels from '../hooks/useLabels';
 import { useTranslation } from 'react-i18next';
 import { useMeta } from '../context/MetaContext';
 
 const SubmitComplaint = () => {
   const { t } = useTranslation();
+  const L = useLabels();
   const location = useLocation();
   const { zones } = useMeta();
   const [loading, setLoading] = useState(false);
@@ -34,6 +37,21 @@ const SubmitComplaint = () => {
   const [audioFile, setAudioFile] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [photoHint, setPhotoHint] = useState(null);
+
+  // When a photo is added, ask the AI what it shows (only a hint; officers and the text classifier still decide).
+  useEffect(() => {
+    setPhotoHint(null);
+    if (!imageFile) return undefined;
+    let cancelled = false;
+    const form = new FormData();
+    form.append('image', imageFile);
+    setPhotoHint({ loading: true });
+    api.post('/complaints/classify-image', form)
+      .then(({ data }) => { if (!cancelled) setPhotoHint(data.category ? data : null); })
+      .catch(() => { if (!cancelled) setPhotoHint(null); });
+    return () => { cancelled = true; };
+  }, [imageFile]);
   const [coordinates, setCoordinates] = useState(null);
 
   const handleGetLocation = () => {
@@ -45,8 +63,7 @@ const SubmitComplaint = () => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        setCoordinates({ latitude, longitude });
-        setFormData(prev => ({ ...prev, location: t('gps_value', { lat: latitude.toFixed(4), lng: longitude.toFixed(4) }) }));
+        pickPoint({ latitude, longitude });
         setGpsLoading(false);
       },
       (error) => {
@@ -55,6 +72,13 @@ const SubmitComplaint = () => {
         setGpsLoading(false);
       }
     );
+  };
+
+  // A point chosen on the map (or by GPS) fills the location field unless the citizen typed an address.
+  const pickPoint = (point) => {
+    setCoordinates(point);
+    setFormData((prev) => (prev.location && !prev.location.startsWith('📍') ? prev
+      : { ...prev, location: `📍 ${t('gps_value', { lat: point.latitude.toFixed(5), lng: point.longitude.toFixed(5) })}` }));
   };
 
   const handleChange = (e) => {
@@ -156,6 +180,7 @@ const SubmitComplaint = () => {
             </button>
           </label>
           <input id="citizen-location" aria-label={t('location_label')} type="text" name="location" value={formData.location} onChange={handleChange} required placeholder={t('location_placeholder')} />
+          <LocationPicker coordinates={coordinates} onChange={pickPoint} email={formData.email} />
         </div>
 
         <div className="form-group">
@@ -185,6 +210,12 @@ const SubmitComplaint = () => {
         <VoiceUpload onAudioSet={setAudioFile} />
 
         <WebcamUpload onCapture={setImageFile} />
+        {photoHint && (
+          <p className="photo-hint">
+            {photoHint.loading ? <><Loader size={14} className="spin" /> {t('photo_hint_checking')}</>
+              : <><Sparkles size={14} /> {t('photo_hint', { category: L.category(photoHint.category), pct: Math.round(photoHint.confidence * 100) })}</>}
+          </p>
+        )}
 
         <div className="mt-4">
           <button className="button full" type="submit" disabled={loading}>

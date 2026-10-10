@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen, ShieldCheck, Ban, ScanText, MessageCircleQuestion, Search, Loader, ExternalLink, CheckCircle2, RotateCcw,
-  Archive, AlertCircle, FileText,
+  Archive, AlertCircle, FileText, PenLine, Trash2, CheckCheck,
 } from 'lucide-react';
+import AnswerForm from '../components/AnswerForm';
 import useLabels from '../hooks/useLabels';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
-const CATEGORIES = ['curated', 'citizen_charter', 'info_page', 'department_info', 'policy', 'circular', 'rti_department', 'home'];
+const CATEGORIES = ['officer_answer', 'curated', 'citizen_charter', 'info_page', 'department_info', 'policy', 'circular', 'rti_department', 'home'];
 const PAGE = 40;
 
 export default function KnowledgeBase() {
@@ -25,12 +26,15 @@ export default function KnowledgeBase() {
   const [status, setStatus] = useState('ALL');
   const [limit, setLimit] = useState(PAGE);
   const [busy, setBusy] = useState(null);
+  const [answers, setAnswers] = useState([]);
+  const [editing, setEditing] = useState(null);
 
   useEffect(() => {
-    Promise.allSettled([api.get('/kb/documents'), api.get('/kb/unanswered')]).then(([docs, unanswered]) => {
+    Promise.allSettled([api.get('/kb/documents'), api.get('/kb/unanswered'), api.get('/kb/answers')]).then(([docs, unanswered, written]) => {
       if (docs.status === 'fulfilled') setDocuments(docs.value.data.documents || []);
       else setError(docs.reason?.response?.data?.message || t('kb_load_failed'));
       if (unanswered.status === 'fulfilled') setQuestions(unanswered.value.data.questions || []);
+      if (written.status === 'fulfilled') setAnswers(written.value.data.answers || []);
       setLoading(false);
     });
   }, [t]);
@@ -60,6 +64,26 @@ export default function KnowledgeBase() {
     }
   };
 
+  const onAnswerSaved = (saved) => {
+    setAnswers((list) => [...list.filter((a) => a.id !== saved.id), saved]);
+    const keys = new Set((saved.questions || []).map((q) => q.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()));
+    setQuestions((list) => list.map((q) => (keys.has(q.question.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()) ? { ...q, handled: true } : q)));
+    setEditing(null);
+    setTab('answers');
+  };
+
+  const removeAnswer = async (answer) => {
+    if (!window.confirm(t('kb_answer_confirm_delete', { title: answer.title }))) return;
+    try {
+      await api.delete(`/kb/answers/${answer.id}`);
+      setAnswers((list) => list.filter((a) => a.id !== answer.id));
+    } catch (err) {
+      alert(err.response?.data?.message || t('kb_update_failed'));
+    }
+  };
+
+  const openQuestions = questions.filter((q) => !q.handled).length;
+
   if (loading) return <div className="page-loading"><Loader className="spin" size={28} /> {t('kb_loading')}</div>;
 
   return (
@@ -80,7 +104,7 @@ export default function KnowledgeBase() {
           { icon: ShieldCheck, label: t('kb_stat_verified'), value: stats.verified, tone: 'green' },
           { icon: Ban, label: t('kb_stat_hidden'), value: stats.hidden, tone: 'rose' },
           { icon: ScanText, label: t('kb_stat_ocr'), value: stats.ocr, tone: 'amber' },
-          { icon: MessageCircleQuestion, label: t('kb_stat_unanswered'), value: questions.length, tone: 'sky' },
+          { icon: MessageCircleQuestion, label: t('kb_stat_unanswered'), value: openQuestions, tone: 'sky' },
         ].map(({ icon: Icon, label, value, tone }) => (
           <div key={label} className={`kb-stat tone-${tone}`}>
             <span className="kb-stat-icon"><Icon size={18} /></span>
@@ -95,11 +119,52 @@ export default function KnowledgeBase() {
           <FileText size={16} /> {t('kb_tab_documents')}
         </button>
         <button type="button" role="tab" aria-selected={tab === 'questions'} className={tab === 'questions' ? 'active' : ''} onClick={() => setTab('questions')}>
-          <MessageCircleQuestion size={16} /> {t('kb_tab_questions')} <span className="kb-tab-count">{questions.length}</span>
+          <MessageCircleQuestion size={16} /> {t('kb_tab_questions')} <span className="kb-tab-count">{openQuestions}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'answers'} className={tab === 'answers' ? 'active' : ''} onClick={() => setTab('answers')}>
+          <PenLine size={16} /> {t('kb_tab_answers')} <span className="kb-tab-count">{answers.length}</span>
         </button>
       </div>
 
-      {tab === 'documents' ? (
+      {editing && (
+        <div className="answer-overlay" role="dialog" aria-modal="true" onClick={(e) => { if (e.target === e.currentTarget) setEditing(null); }}>
+          <AnswerForm initial={editing} onSaved={onAnswerSaved} onCancel={() => setEditing(null)} />
+        </div>
+      )}
+
+      {tab === 'answers' ? (
+        <div className="card kb-card">
+          <div className="kb-toolbar">
+            <p className="form-note kb-answers-intro">{t('kb_answers_intro')}</p>
+            {isAdmin && <button type="button" className="button" onClick={() => setEditing({})}><PenLine size={16} /> {t('kb_answer_new')}</button>}
+          </div>
+          <ul className="kb-list">
+            {[...answers].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).map((a) => (
+              <li key={a.id} className="kb-doc is-verified">
+                <div className="kb-doc-main">
+                  <div className="kb-doc-head"><strong>{a.title}</strong><span className="kb-badge verified"><ShieldCheck size={12} /> {t('kb_answer_badge')}</span></div>
+                  <p className="kb-answer-text">{a.answer}</p>
+                  <div className="kb-meta">
+                    {a.department && <span>{L.department(a.department)}</span>}
+                    {(a.questions || []).slice(0, 3).map((q) => <span key={q}>“{q}”</span>)}
+                    {a.author && <span>{t('kb_reviewed', { who: a.author, date: (a.updatedAt || '').slice(0, 10) })}</span>}
+                  </div>
+                </div>
+                <div className="kb-actions">
+                  {a.sourceUrl && <a href={a.sourceUrl} target="_blank" rel="noreferrer" className="dash-view"><ExternalLink size={14} /> {t('kb_source')}</a>}
+                  {isAdmin && (
+                    <>
+                      <button type="button" className="kb-act" onClick={() => setEditing(a)}><PenLine size={14} /> {t('kb_answer_edit_btn')}</button>
+                      <button type="button" className="kb-act bad" onClick={() => removeAnswer(a)}><Trash2 size={14} /> {t('kb_answer_delete')}</button>
+                    </>
+                  )}
+                </div>
+              </li>
+            ))}
+            {answers.length === 0 && <li className="empty-state">{t('kb_no_answers')}</li>}
+          </ul>
+        </div>
+      ) : tab === 'documents' ? (
         <div className="card kb-card">
           <div className="kb-toolbar">
             <div className="dash-search">
@@ -174,9 +239,9 @@ export default function KnowledgeBase() {
           <p className="form-note kb-q-intro">{t('kb_questions_intro')}</p>
           <ul className="kb-questions">
             {questions.map((q) => (
-              <li key={q.question}>
+              <li key={q.question} className={q.handled ? 'is-handled' : ''}>
                 <span className="kb-q-count" title={t('kb_times_asked')}>{q.count}×</span>
-                <div>
+                <div className="kb-q-body">
                   <strong>{q.question}</strong>
                   <span className="kb-meta">
                     {q.topic && <span>{q.topic.replace(/_/g, ' ')}</span>}
@@ -184,6 +249,8 @@ export default function KnowledgeBase() {
                     {q.lastAsked && <span>{t('kb_last_asked', { date: L.date(q.lastAsked, { dateStyle: 'medium' }) })}</span>}
                   </span>
                 </div>
+                {q.handled ? <span className="kb-badge verified kb-q-done"><CheckCheck size={12} /> {t('kb_answered')}</span>
+                  : isAdmin && <button type="button" className="kb-act good kb-q-write" onClick={() => setEditing({ title: q.question, questions: [q.question] })}><PenLine size={14} /> {t('kb_write_answer')}</button>}
               </li>
             ))}
             {questions.length === 0 && <li className="empty-state">{t('kb_no_questions')}</li>}

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus, submitFeedback, uploadResolutionPhoto } = require('../controllers/complaintController');
+const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus, submitFeedback, uploadResolutionPhoto, getNearbyComplaints, supportComplaint, classifyPhoto } = require('../controllers/complaintController');
 const { protect, admin } = require('../middleware/authMiddleware');
 const rateLimit = require('../middleware/rateLimit');
 
@@ -25,6 +25,12 @@ const imageUpload = multer({
 // Citizen (public) endpoints
 router.post('/', rateLimit({ windowMs: 60 * 60 * 1000, max: 20 }), upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'image', maxCount: 1 }]), createComplaint);
 router.post('/status', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), getComplaintStatus);
+// In-memory photo for the instant category hint (never stored).
+const memoryImage = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp|heic|heif)$/.test(file.mimetype)) });
+router.post('/classify-image', rateLimit({ windowMs: 60 * 1000, max: 20 }), memoryImage.single('image'), classifyPhoto);
+router.get('/nearby', rateLimit({ windowMs: 60 * 1000, max: 30 }), getNearbyComplaints);
+router.post('/support', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), supportComplaint);
 router.post('/feedback', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), submitFeedback);
 
 // Officer endpoints

@@ -192,6 +192,98 @@ class DocumentReview(BaseModel):
     verified: Optional[bool] = None
     reviewer: Optional[str] = None
 
+@app.post("/transcribe")
+async def transcribe(audio: UploadFile = File(...), language: Optional[str] = Form(None)):
+    """Speech to text for the chatbot's mic button. Audio is written to a temp file and deleted right away."""
+    import tempfile
+    data = await audio.read()
+    if not data or len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Audio is empty or larger than 10 MB")
+    lang = language if language in ("en", "hi", "mr") else None
+    fd, path = tempfile.mkstemp(suffix=".audio")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        text = transcribe_audio(path, lang)
+    except Exception as error:
+        logging.getLogger(__name__).error(f"Transcription failed: {error}")
+        raise HTTPException(status_code=422, detail="Could not understand the audio")
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+    return {"text": text}
+
+@app.post("/classify-image")
+async def classify_image_endpoint(image: UploadFile = File(...)):
+    """Suggest a complaint category from a photo (CLIP zero-shot). The temp file is deleted right away."""
+    import tempfile
+    from classification.image_classifier import classify_image
+    data = await image.read()
+    if not data or len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image is empty or larger than 8 MB")
+    fd, path = tempfile.mkstemp(suffix=".img")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        return classify_image(path)
+    except Exception as error:
+        logging.getLogger(__name__).error(f"Image classification failed: {error}")
+        raise HTTPException(status_code=422, detail="Could not read the image")
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+
+class OfficerAnswer(BaseModel):
+    id: Optional[str] = None
+    title: str
+    answer: str
+    questions: List[str] = []
+    department: Optional[str] = None
+    topic: Optional[str] = None
+    sourceUrl: Optional[str] = None
+    serviceUrl: Optional[str] = None
+    serviceLabel: Optional[str] = None
+    author: Optional[str] = None
+
+@app.get("/kb/answers")
+def kb_answers(request: Request):
+    local_only(request)
+    from chat.hybrid import hybrid
+    return {"answers": hybrid.answers()}
+
+@app.post("/kb/answers")
+def kb_save_answer(payload: OfficerAnswer, request: Request):
+    local_only(request)
+    import uuid
+    from datetime import datetime
+    from chat.hybrid import hybrid
+    title, answer = payload.title.strip()[:200], payload.answer.strip()[:3000]
+    if len(title) < 3 or len(answer) < 10:
+        raise HTTPException(status_code=400, detail="A title and an answer of at least 10 characters are required")
+    for url in (payload.sourceUrl, payload.serviceUrl):
+        if url and not re.match(r"^https?://", url):
+            raise HTTPException(status_code=400, detail="Links must start with http:// or https://")
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = next((a for a in hybrid.answers() if a["id"] == payload.id), None) if payload.id else None
+    record = {
+        "id": payload.id if existing else uuid.uuid4().hex[:12], "title": title, "answer": answer,
+        "questions": [q.strip()[:200] for q in payload.questions if q.strip()][:10],
+        "department": payload.department, "topic": payload.topic, "sourceUrl": payload.sourceUrl,
+        "serviceUrl": payload.serviceUrl, "serviceLabel": payload.serviceLabel,
+        "author": payload.author, "createdAt": existing["createdAt"] if existing else now, "updatedAt": now,
+    }
+    return hybrid.save_answer(record)
+
+@app.delete("/kb/answers/{answer_id}")
+def kb_delete_answer(answer_id: str, request: Request):
+    local_only(request)
+    from chat.hybrid import hybrid
+    try:
+        hybrid.delete_answer(answer_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Answer not found")
+    return {"deleted": answer_id}
+
 @app.post("/kb/documents/{doc_id}")
 def kb_review_document(doc_id: str, review: DocumentReview, request: Request):
     local_only(request)

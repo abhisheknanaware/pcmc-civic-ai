@@ -319,6 +319,25 @@ exports.checkStatus = async (req, res) => {
   res.json({ intro: t.statusIntro(complaint.ticketNumber), complaint: citizenView(complaint) });
 };
 
+// POST /api/chat/transcribe (multipart "audio", optional "uiLanguage") — speech to text for the mic button.
+// The text comes back to the input box so the citizen can check it before sending.
+exports.transcribe = async (req, res) => {
+  if (!req.file?.buffer?.length) return res.status(400).json({ message: 'No audio received.' });
+  try {
+    const form = new FormData();
+    form.append('audio', new Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' }), 'question.webm');
+    const lang = { hi: 'hi', mr: 'mr', en: 'en' }[req.body?.uiLanguage];
+    if (lang) form.append('language', lang);
+    const response = await fetch(`${NLP_BASE}/transcribe`, { method: 'POST', body: form, signal: AbortSignal.timeout(60000) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(response.status === 422 ? 422 : 502).json({ message: data.detail || 'Could not transcribe the audio.' });
+    res.json({ text: String(data.text || '').slice(0, 1000) });
+  } catch (error) {
+    console.error('Transcription error:', error.message);
+    res.status(502).json({ message: 'Could not transcribe the audio.' });
+  }
+};
+
 // POST /api/chat/event { sessionId, type: "service_click" }
 exports.trackEvent = async (req, res) => {
   const sessionId = String(req.body?.sessionId || '');

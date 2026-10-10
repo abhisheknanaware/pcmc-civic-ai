@@ -115,7 +115,10 @@ const complaintSchema = new mongoose.Schema({
     comment: { type: String, maxlength: 500 },
     at: Date,
   },
-  reopenCount: { type: Number, default: 0 }
+  reopenCount: { type: Number, default: 0 },
+  // "Me too": other citizens affected by the same issue. Emails are stored only as salted hashes (to stop double votes).
+  supporters: [{ _id: false, emailHash: String, at: { type: Date, default: Date.now } }],
+  supportCount: { type: Number, default: 0 }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Complaint', complaintSchema);

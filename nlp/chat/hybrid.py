@@ -34,6 +34,25 @@ COLLECTION = "pcmc_kb"
 # Officer decisions from the knowledge-base admin page (verify / disable / supersede), applied on every load.
 OVERRIDES_PATH = os.path.join(NLP_ROOT, "data", "kb_overrides.json")
 DOC_STATUSES = ("active", "disabled", "superseded")
+# Answers written by officers from the knowledge-base page (e.g. for frequently unanswered questions).
+ANSWERS_PATH = os.path.join(NLP_ROOT, "data", "kb_answers.json")
+
+
+def answer_chunk(a):
+    """An officer answer as a verified, top-authority knowledge chunk."""
+    questions = " ".join(a.get("questions") or [])
+    text = f"{a['title']}\n{a['answer']}"
+    return {
+        "chunk_id": f"answer-{a['id']}", "doc_id": f"answer-{a['id']}", "position": 0,
+        "text": text, "body": a["answer"], "search_text": normalise(f"{text}\n{questions}"),
+        "title": a["title"], "section": None, "url": a.get("sourceUrl"), "service_url": a.get("serviceUrl"),
+        "service_label": a.get("serviceLabel"), "category": "officer_answer", "doc_type": "curated",
+        "department": a.get("department"), "topic": a.get("topic"), "language": "en", "authority_level": 0,
+        "verified": True, "status": "active", "published_date": None, "date_source": None,
+        "effective_from": None, "effective_until": None, "supersedes": None, "superseded_by": None,
+        "extraction_method": "manual", "ocr_confidence": None, "text_quality": "good",
+        "fetched_at": (a.get("updatedAt") or a.get("createdAt") or "")[:10],
+    }
 RERANK_MODEL = os.getenv("KB_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 CANDIDATES = int(os.getenv("KB_CANDIDATES", "30"))
 RERANK_TOP = int(os.getenv("KB_RERANK_TOP", "12"))
@@ -96,27 +115,78 @@ class HybridRetriever:
         finally:
             client.close()  # release the file lock for the ingestion job
 
-        tokens = [_tokens(normalise(c["search_text"])) for c in chunks]
-        df = Counter(t for toks in tokens for t in set(toks))
-        n = len(chunks)
+        # Officer-written answers live outside the crawled index and are embedded at load time.
+        answers = self._read_answers()
+        answer_chunks = [answer_chunk(a) for a in answers]
+        answer_vectors = list(embed([c["text"] for c in answer_chunks])) if answer_chunks else []
         with self._lock:
-            self.chunks = chunks
-            self.vectors = np.asarray(vectors, dtype=np.float32)
-            self.tf = [Counter(t) for t in tokens]
-            self.by_doc = {}
-            for c in sorted(chunks, key=lambda c: c.get("position", 0)):
-                self.by_doc.setdefault(c["doc_id"], []).append(c)
-            self.lengths = np.array([len(t) for t in tokens], dtype=np.float32)
-            self.avg_len = float(self.lengths.mean()) if n else 1.0
-            self.idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
+            self.base_chunks, self.base_vectors = chunks, vectors
+            self._index(chunks + answer_chunks, vectors + answer_vectors)
             if USE_RERANKER and self.reranker is None:
                 from sentence_transformers import CrossEncoder
                 self.reranker = CrossEncoder(RERANK_MODEL, device="cpu", max_length=384)
             for doc_id, decision in self._read_overrides().items():
                 self._apply(doc_id, decision)
             self.ready = True
-        logger.info(f"Hybrid KB loaded: {n} chunks in {time.time() - started:.1f}s")
+        logger.info(f"Hybrid KB loaded: {len(self.chunks)} chunks ({len(answer_chunks)} officer answers) in {time.time() - started:.1f}s")
         return True
+
+    def _index(self, chunks, vectors):
+        """(Re)build the in-memory vector matrix and BM25 statistics. Caller holds the lock."""
+        tokens = [_tokens(normalise(c["search_text"])) for c in chunks]
+        df = Counter(t for toks in tokens for t in set(toks))
+        n = len(chunks)
+        self.chunks = chunks
+        self.vectors = np.asarray(vectors, dtype=np.float32)
+        self.tf = [Counter(t) for t in tokens]
+        self.by_doc = {}
+        for c in sorted(chunks, key=lambda c: c.get("position", 0)):
+            self.by_doc.setdefault(c["doc_id"], []).append(c)
+        self.lengths = np.array([len(t) for t in tokens], dtype=np.float32)
+        self.avg_len = float(self.lengths.mean()) if n else 1.0
+        self.idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
+
+    # ---------------- officer-written answers ----------------
+    @staticmethod
+    def _read_answers():
+        try:
+            with open(ANSWERS_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
+    def answers(self):
+        return self._read_answers()
+
+    def save_answer(self, answer):
+        """Create or update an officer answer; it is searchable immediately."""
+        answers = [a for a in self._read_answers() if a["id"] != answer["id"]] + [answer]
+        self._write_answers(answers)
+        self._refresh_answers(answers)
+        return answer
+
+    def delete_answer(self, answer_id):
+        answers = self._read_answers()
+        remaining = [a for a in answers if a["id"] != answer_id]
+        if len(remaining) == len(answers):
+            raise KeyError(answer_id)
+        self._write_answers(remaining)
+        self._refresh_answers(remaining)
+
+    @staticmethod
+    def _write_answers(answers):
+        tmp = ANSWERS_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(answers, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, ANSWERS_PATH)
+
+    def _refresh_answers(self, answers):
+        answer_chunks = [answer_chunk(a) for a in answers]
+        answer_vectors = list(embed([c["text"] for c in answer_chunks])) if answer_chunks else []
+        with self._lock:
+            self._index(self.base_chunks + answer_chunks, self.base_vectors + answer_vectors)
+            for doc_id, decision in self._read_overrides().items():
+                self._apply(doc_id, decision)
 
     reload = load
 

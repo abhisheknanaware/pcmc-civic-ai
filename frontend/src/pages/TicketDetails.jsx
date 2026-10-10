@@ -248,6 +248,12 @@ export default function TicketDetails() {
             : complaint.slaDeadline ? <strong className={`sla-pill ${slaMissed ? 'late' : 'ok'}`}><Clock size={13} /> {L.timeRemaining(complaint.slaDeadline)}</strong>
             : <strong className="sla-pill none">{L.sla('No SLA')}</strong>}
         </div>
+        {complaint.supportCount > 0 && (
+          <div className="ticket-summary-item">
+            <span>{t('metoo_officer_label')}</span>
+            <strong className="affected-chip big">👥 {t('metoo_affected', { count: complaint.supportCount + 1 })}</strong>
+          </div>
+        )}
         <div className="ticket-summary-item">
           <span>{t('time_since_reported')}</span>
           <strong className="ticket-summary-muted">{L.timeSince(complaint.createdAt)}</strong>

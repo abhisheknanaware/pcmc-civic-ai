@@ -14,6 +14,7 @@ import MapView from './pages/MapView';
 import ChatWidget from './components/ChatWidget';
 import AskPcmc from './pages/AskPcmc';
 import KnowledgeBase from './pages/KnowledgeBase';
+import Transparency from './pages/Transparency';
 import Skyline from './components/Skyline';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MetaProvider, useMeta } from './context/MetaContext';
@@ -67,6 +68,7 @@ function Shell() {
             <NavLink to="/report">{t('nav_submit')}</NavLink>
             <NavLink to="/track">{t('nav_track')}</NavLink>
             <NavLink to="/ask">{t('nav_ask')}</NavLink>
+            <NavLink to="/transparency">{t('nav_transparency')}</NavLink>
             {officer && (
               <>
                 <NavLink to="/dashboard">{t('nav_dashboard')}</NavLink>
@@ -104,6 +106,7 @@ function Shell() {
           <Route path="/report" element={<SubmitComplaint />} />
           <Route path="/track" element={<TrackComplaint />} />
           <Route path="/ask" element={<AskPcmc />} />
+          <Route path="/transparency" element={<Transparency />} />
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<OfficerRoute><Dashboard /></OfficerRoute>} />
           <Route path="/map" element={<OfficerRoute><MapView /></OfficerRoute>} />
@@ -124,6 +127,7 @@ function Shell() {
             <Link to="/report">{t('nav_submit')}</Link>
             <Link to="/track">{t('nav_track')}</Link>
             <Link to="/ask">{t('nav_ask')}</Link>
+            <Link to="/transparency">{t('nav_transparency')}</Link>
             <a href={`tel:${corporation?.sarathiHelpline || '8888006666'}`}>Sarathi {corporation?.sarathiHelpline || '8888006666'}</a>
             {corporation?.website && <a href={corporation.website} target="_blank" rel="noreferrer">pcmcindia.gov.in</a>}
           </nav>

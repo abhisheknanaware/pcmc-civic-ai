@@ -25,3 +25,4 @@ pillow
 qdrant-client
 # optional: cross-encoder re-ranker (KB_RERANK=1)
 sentence-transformers
+imageio-ffmpeg

@@ -222,7 +222,7 @@ export default function Dashboard() {
                 <tr key={c._id} className={`prio-row-${priority.toLowerCase()} ${overdue ? 'is-overdue' : ''}`}>
                   <td><span className="ticket-chip">{c.ticketNumber || `#${c._id.slice(-6)}`}</span></td>
                   <td className="dash-cat">
-                    <strong>{L.category(c.category)}</strong>
+                    <strong>{L.category(c.category)}{c.supportCount > 0 && <span className="affected-chip" title={t('metoo_affected', { count: c.supportCount + 1 })}>👥 {c.supportCount + 1}</span>}</strong>
                     {preview(c) && <span>{preview(c)}</span>}
                   </td>
                   <td className="dash-dept">{L.department(c.department, t('general'))}</td>

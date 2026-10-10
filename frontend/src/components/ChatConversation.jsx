@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Send, Loader, ExternalLink, Phone, FilePlus, Search, ShieldCheck, Info } from 'lucide-react';
+import { Send, Loader, ExternalLink, Phone, FilePlus, Search, ShieldCheck, Info, Mic, Square } from 'lucide-react';
 import useLabels from '../hooks/useLabels';
 import { API_BASE } from '../constants';
 
@@ -151,6 +151,54 @@ export default function ChatConversation({ ref, onLeave, welcome = true, autoFoc
 
   useImperativeHandle(ref, () => ({ ask: send, focus: () => inputRef.current?.focus() }));
 
+  // ---- Voice questions: record, transcribe with Whisper, put the text in the box for the citizen to check ----
+  const voiceSupported = typeof window !== 'undefined' && Boolean(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
+  const recorderRef = useRef(null);
+
+  const startRecording = async () => {
+    setVoiceError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const parts = [];
+      recorder.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        clearTimeout(recorder.limit);
+        setRecording(false);
+        const audio = new Blob(parts, { type: recorder.mimeType || 'audio/webm' });
+        if (audio.size < 1500) { setVoiceError(t('voice_too_short')); return; }
+        setTranscribing(true);
+        try {
+          const form = new FormData();
+          form.append('audio', audio, 'question.webm');
+          form.append('uiLanguage', i18n.language);
+          const response = await fetch(`${API_BASE}/api/chat/transcribe`, { method: 'POST', body: form });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(response.status === 429 ? t('too_many_requests') : t('voice_failed'));
+          if (!data.text) throw new Error(t('voice_empty'));
+          setInput(data.text);
+          setTimeout(() => inputRef.current?.focus(), 0);
+        } catch (err) {
+          setVoiceError(err.message || t('voice_failed'));
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      recorder.limit = setTimeout(() => recorder.state === 'recording' && recorder.stop(), 30000); // 30 s max
+      setRecording(true);
+    } catch {
+      setVoiceError(t('voice_permission'));
+    }
+  };
+  const stopRecording = () => recorderRef.current?.state === 'recording' && recorderRef.current.stop();
+  useEffect(() => () => { if (recorderRef.current?.state === 'recording') recorderRef.current.stop(); }, []);
+
   const registerComplaint = (text) => {
     navigate('/report', { state: { complaint: text, chatSessionId: sessionId, fromChat: Date.now() } });
     onLeave?.();
@@ -245,9 +293,18 @@ export default function ChatConversation({ ref, onLeave, welcome = true, autoFoc
         ))}
       </div>
 
+      {voiceError && <p className="chat-voice-error">{voiceError}</p>}
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); send(input); }}>
-        <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder={t('chat_placeholder')} maxLength={1000} disabled={busy} aria-label={t('chat_placeholder')} />
-        <button type="submit" disabled={busy || !input.trim()} aria-label={t('chat_send')}>{busy ? <Loader size={16} className="spin" /> : <Send size={16} />}</button>
+        <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
+          placeholder={recording ? t('voice_listening') : transcribing ? t('voice_transcribing') : t('chat_placeholder')}
+          maxLength={1000} disabled={busy || recording || transcribing} aria-label={t('chat_placeholder')} />
+        {voiceSupported && (
+          <button type="button" className={`chat-mic ${recording ? 'recording' : ''}`} onClick={recording ? stopRecording : startRecording}
+            disabled={busy || transcribing} aria-label={t(recording ? 'voice_stop' : 'voice_start')} title={t(recording ? 'voice_stop' : 'voice_start')}>
+            {transcribing ? <Loader size={16} className="spin" /> : recording ? <Square size={14} /> : <Mic size={16} />}
+          </button>
+        )}
+        <button type="submit" disabled={busy || recording || transcribing || !input.trim()} aria-label={t('chat_send')}>{busy ? <Loader size={16} className="spin" /> : <Send size={16} />}</button>
       </form>
       <p className="chat-disclaimer">{t('chat_disclaimer')}</p>
     </>
