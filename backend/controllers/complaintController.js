@@ -59,7 +59,8 @@ exports.citizenView = citizenView;
 // Ask the NLP service which category a photo shows (CLIP). Returns null if unavailable.
 async function classifyImage(buffer, type = 'image/jpeg') {
   try {
-    const form = new FormData();
+    // Node's built-in (WHATWG) FormData — this file's `FormData` is the older form-data package used for audio.
+    const form = new globalThis.FormData();
     form.append('image', new Blob([buffer], { type }), 'photo.jpg');
     const nlpBase = new URL(process.env.NLP_SERVICE_URL || 'http://localhost:8000/process').origin;
     const response = await fetch(`${nlpBase}/classify-image`, { method: 'POST', body: form, signal: AbortSignal.timeout(30000) });
