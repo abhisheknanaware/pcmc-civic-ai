@@ -436,7 +436,7 @@ export default {
   "kb_questions_intro": "Questions from the last 90 days that the assistant could not answer from verified PCMC information. Use them to decide which information to add next.",
   "kb_times_asked": "Times asked",
   "kb_last_asked": "Last asked {{date}}",
-  "kb_no_questions": "No unanswered questions. 🎉",
+  "kb_no_questions": "No unanswered questions right now.",
   "proof_title": "Proof of fix",
   "proof_hint": "Upload an \"after\" photo when the work is done. The citizen sees it next to their photo.",
   "proof_upload": "Upload after photo",

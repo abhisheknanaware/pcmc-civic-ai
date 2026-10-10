@@ -9,6 +9,7 @@ import { useMeta } from '../context/MetaContext';
 import { getComplaintStatus } from '../services/api';
 import ComplaintTimeline from '../components/ComplaintTimeline';
 import FeedbackForm from '../components/FeedbackForm';
+import StarRating from '../components/StarRating';
 
 // Progress shown on the result banner; WAITING_FOR_CUSTOMER sits with "in progress".
 const STAGES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED'];
@@ -201,7 +202,7 @@ export default function TrackComplaint() {
               {!result.canGiveFeedback && !feedbackMessage && result.feedback && (
                 <p className={`feedback-verdict track-feedback-given ${result.feedback.resolved ? 'yes' : 'no'}`}>
                   {t(result.feedback.resolved ? 'feedback_given_yes' : 'feedback_given_no')}
-                  {result.feedback.rating ? <span className="feedback-stars">{'★'.repeat(result.feedback.rating)}{'☆'.repeat(5 - result.feedback.rating)}</span> : null}
+                  {result.feedback.rating ? <StarRating value={result.feedback.rating} /> : null}
                 </p>
               )}
             </div>

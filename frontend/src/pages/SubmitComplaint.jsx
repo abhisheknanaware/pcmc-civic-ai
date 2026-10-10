@@ -75,13 +75,16 @@ const SubmitComplaint = () => {
   };
 
   // A point chosen on the map (or by GPS) fills the location field unless the citizen typed an address.
+  const [autoLocation, setAutoLocation] = useState(false);
   const pickPoint = (point) => {
     setCoordinates(point);
-    setFormData((prev) => (prev.location && !prev.location.startsWith('📍') ? prev
-      : { ...prev, location: `📍 ${t('gps_value', { lat: point.latitude.toFixed(5), lng: point.longitude.toFixed(5) })}` }));
+    if (formData.location && !autoLocation) return;
+    setAutoLocation(true);
+    setFormData((prev) => ({ ...prev, location: t('gps_value', { lat: point.latitude.toFixed(5), lng: point.longitude.toFixed(5) }) }));
   };
 
   const handleChange = (e) => {
+    if (e.target.name === 'location') setAutoLocation(false);
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -179,7 +182,10 @@ const SubmitComplaint = () => {
               {gpsLoading ? t('fetching') : t('use_location')}
             </button>
           </label>
-          <input id="citizen-location" aria-label={t('location_label')} type="text" name="location" value={formData.location} onChange={handleChange} required placeholder={t('location_placeholder')} />
+          <div className="input-with-icon">
+            <MapPin size={17} aria-hidden="true" />
+            <input id="citizen-location" aria-label={t('location_label')} type="text" name="location" value={formData.location} onChange={handleChange} required placeholder={t('location_placeholder')} />
+          </div>
           <LocationPicker coordinates={coordinates} onChange={pickPoint} email={formData.email} />
         </div>
 

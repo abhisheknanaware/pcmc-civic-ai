@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square, ArrowLeft, MessageSquareText, History, Star, SlidersHorizontal, Camera, Upload } from 'lucide-react';
+import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square, ArrowLeft, MessageSquareText, History, Star, SlidersHorizontal, Camera, Upload, Users } from 'lucide-react';
+import StarRating from '../components/StarRating';
 import useLabels from '../hooks/useLabels';
 import { API_BASE, PRIORITIES, STATUSES } from '../constants';
 import api, { authFetch } from '../services/api';
@@ -251,7 +252,7 @@ export default function TicketDetails() {
         {complaint.supportCount > 0 && (
           <div className="ticket-summary-item">
             <span>{t('metoo_officer_label')}</span>
-            <strong className="affected-chip big">👥 {t('metoo_affected', { count: complaint.supportCount + 1 })}</strong>
+            <strong className="affected-chip big"><Users size={14} /> {t('metoo_affected', { count: complaint.supportCount + 1 })}</strong>
           </div>
         )}
         <div className="ticket-summary-item">
@@ -381,7 +382,7 @@ export default function TicketDetails() {
                   <>
                     <p className={`feedback-verdict ${complaint.feedback.resolved ? 'yes' : 'no'}`}>
                       {t(complaint.feedback.resolved ? 'feedback_given_yes' : 'feedback_given_no')}
-                      {complaint.feedback.rating ? <span className="feedback-stars">{'★'.repeat(complaint.feedback.rating)}{'☆'.repeat(5 - complaint.feedback.rating)}</span> : null}
+                      {complaint.feedback.rating ? <StarRating value={complaint.feedback.rating} /> : null}
                     </p>
                     {complaint.feedback.comment && <p className="request-copy">{complaint.feedback.comment}</p>}
                   </>

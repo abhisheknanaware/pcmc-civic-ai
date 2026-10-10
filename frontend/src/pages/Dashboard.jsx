@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  BarChart3, Inbox, AlertTriangle, CheckCircle, Clock, Trash2, Loader, Search, ArrowRight, ShieldAlert, Sparkles, Map,
+  BarChart3, Inbox, AlertTriangle, CheckCircle, Clock, Trash2, Loader, Search, ArrowRight, ShieldAlert, Sparkles, Map, Users,
 } from 'lucide-react';
 import useLabels from '../hooks/useLabels';
 import { PRIORITIES } from '../constants';
@@ -222,7 +222,7 @@ export default function Dashboard() {
                 <tr key={c._id} className={`prio-row-${priority.toLowerCase()} ${overdue ? 'is-overdue' : ''}`}>
                   <td><span className="ticket-chip">{c.ticketNumber || `#${c._id.slice(-6)}`}</span></td>
                   <td className="dash-cat">
-                    <strong>{L.category(c.category)}{c.supportCount > 0 && <span className="affected-chip" title={t('metoo_affected', { count: c.supportCount + 1 })}>👥 {c.supportCount + 1}</span>}</strong>
+                    <strong>{L.category(c.category)}{c.supportCount > 0 && <span className="affected-chip" title={t('metoo_affected', { count: c.supportCount + 1 })}><Users size={12} /> {c.supportCount + 1}</span>}</strong>
                     {preview(c) && <span>{preview(c)}</span>}
                   </td>
                   <td className="dash-dept">{L.department(c.department, t('general'))}</td>

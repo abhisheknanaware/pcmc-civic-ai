@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, CircleMarker, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, AttributionControl, TileLayer, Marker, CircleMarker, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Users, Loader, ThumbsUp, CheckCircle, MapPin } from 'lucide-react';
 import useLabels from '../hooks/useLabels';
@@ -72,7 +72,8 @@ export default function LocationPicker({ coordinates, onChange, email }) {
   return (
     <div className="picker">
       <div className="picker-map">
-        <MapContainer center={center} zoom={13} scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>
+        <MapContainer attributionControl={false} center={center} zoom={13} scrollWheelZoom={false} style={{ height: '100%', width: '100%' }}>
+            <AttributionControl prefix='<a href="https://leafletjs.com" target="_blank" rel="noreferrer">Leaflet</a>' />
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <ClickToPlace onPick={onChange} />
           <FollowPoint point={coordinates} />

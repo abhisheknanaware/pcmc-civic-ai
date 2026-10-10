@@ -1345,3 +1345,13 @@ a.chat-close { display: inline-grid; place-items: center; color: #fff; border-ra
 
 /* Photo category hint on the report form */
 .photo-hint { display: flex; align-items: center; gap: 8px; margin: -6px 0 16px; padding: 10px 12px; color: #0b4540; background: #e9f4ef; border: 1px solid #cfe5db; border-radius: 12px; font-size: .84rem; font-weight: 600; }
+
+/* Icon inside a text field (report form location) */
+.input-with-icon { position: relative; }
+.input-with-icon > svg { position: absolute; left: 13px; top: 50%; color: var(--primary); transform: translateY(-50%); pointer-events: none; }
+.input-with-icon > input { padding-left: 40px; }
+/* Read-only star rating */
+.star-rating { display: inline-flex; gap: 1px; vertical-align: middle; }
+.star-rating svg { color: #d5dbd8; }
+.star-rating svg.on { color: #e8891c; fill: currentColor; }
+.affected-chip svg { flex: none; }

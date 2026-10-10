@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, AttributionControl, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import { Link } from 'react-router-dom';
 import { Loader, MapPin, AlertCircle, Clock, ChevronRight } from 'lucide-react';
 import L from 'leaflet';
@@ -156,7 +156,8 @@ export default function MapView() {
 
         {/* Map Container */}
         <div className="card map-canvas">
-          <MapContainer center={cityCenter} zoom={12} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+          <MapContainer attributionControl={false} center={cityCenter} zoom={12} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+            <AttributionControl prefix='<a href="https://leafletjs.com" target="_blank" rel="noreferrer">Leaflet</a>' />
             <ChangeView center={mapCenter} zoom={mapZoom} />
             <AutoResize />
             <TileLayer
