@@ -1,11 +1,16 @@
 const ChatSession = require('../models/ChatSession');
+const { logAudit } = require('../services/audit');
 
 const NLP_BASE = new URL(process.env.NLP_SERVICE_URL || 'http://localhost:8000/process').origin;
 
 async function nlp(path, options = {}) {
   const response = await fetch(`${NLP_BASE}${path}`, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(process.env.INTERNAL_API_TOKEN ? { 'X-Internal-Token': process.env.INTERNAL_API_TOKEN } : {}),
+      ...(options.headers || {}),
+    },
     signal: AbortSignal.timeout(15000),
   });
   const data = await response.json().catch(() => ({}));
@@ -35,6 +40,7 @@ exports.reviewDocument = async (req, res) => {
       method: 'POST',
       body: JSON.stringify({ status, verified, reviewer: req.user.email }),
     });
+    logAudit(req, 'kb.document_review', doc.title || req.params.id, { status, verified });
     res.json(doc);
   } catch (error) {
     res.status(error.status === 404 || error.status === 400 ? error.status : 502).json({ message: error.message });
@@ -60,6 +66,7 @@ exports.saveAnswer = async (req, res) => {
       method: 'POST',
       body: JSON.stringify({ id, title, answer, questions: Array.isArray(questions) ? questions : [], department, topic, sourceUrl, serviceUrl, serviceLabel, author: req.user.email }),
     });
+    logAudit(req, id ? 'kb.answer_update' : 'kb.answer_create', saved.title);
     res.json(saved);
   } catch (error) {
     res.status(error.status === 400 || error.status === 422 ? 400 : 502).json({ message: error.status === 422 ? 'Please fill in the title and answer.' : error.message });
@@ -69,7 +76,9 @@ exports.saveAnswer = async (req, res) => {
 // DELETE /api/kb/answers/:id (admins only).
 exports.deleteAnswer = async (req, res) => {
   try {
-    res.json(await nlp(`/kb/answers/${encodeURIComponent(req.params.id)}`, { method: 'DELETE' }));
+    const result = await nlp(`/kb/answers/${encodeURIComponent(req.params.id)}`, { method: 'DELETE' });
+    logAudit(req, 'kb.answer_delete', req.params.id);
+    res.json(result);
   } catch (error) {
     res.status(error.status === 404 ? 404 : 502).json({ message: error.message });
   }
@@ -104,5 +113,36 @@ exports.unansweredQuestions = async (req, res) => {
     res.json({ questions });
   } catch (error) {
     res.status(500).json({ message: 'Could not load unanswered questions.' });
+  }
+};
+
+// GET /api/kb/refresh - last weekly refresh: when it ran, what changed, when the next one is due.
+exports.refreshStatus = async (req, res) => {
+  try {
+    res.json(await nlp('/kb/refresh'));
+  } catch (error) {
+    res.status(502).json({ message: 'Could not reach the chatbot service.' });
+  }
+};
+
+// POST /api/kb/refresh - admins start a re-crawl now (runs in the background on the NLP service).
+exports.startRefresh = async (req, res) => {
+  try {
+    await nlp('/kb/refresh', { method: 'POST' });
+    logAudit(req, 'kb.refresh', 'knowledge base', { trigger: 'manual' });
+    res.status(202).json({ started: true });
+  } catch (error) {
+    res.status(error.status === 409 ? 409 : 502).json({ message: error.status === 409 ? 'A refresh is already running.' : 'Could not reach the chatbot service.' });
+  }
+};
+
+// POST /api/kb/refresh/reviewed - admin confirms the changed pages have been checked.
+exports.markRefreshReviewed = async (req, res) => {
+  try {
+    await nlp('/kb/refresh/reviewed', { method: 'POST', body: JSON.stringify({ reviewer: req.user.email }) });
+    logAudit(req, 'kb.refresh_reviewed', 'knowledge base');
+    res.json({ reviewed: true });
+  } catch (error) {
+    res.status(error.status === 404 ? 404 : 502).json({ message: error.message });
   }
 };

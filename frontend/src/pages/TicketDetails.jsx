@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square, ArrowLeft, MessageSquareText, History, Star, SlidersHorizontal, Camera, Upload, Users } from 'lucide-react';
+import { Bot, Save, AlertCircle, RefreshCw, Loader, Zap, Clock, ChevronRight, Languages, Square, ArrowLeft, MessageSquareText, History, Star, SlidersHorizontal, Camera, Upload, Users, GitMerge, StickyNote, Lock, Plus } from 'lucide-react';
 import StarRating from '../components/StarRating';
 import useLabels from '../hooks/useLabels';
 import { API_BASE, PRIORITIES, STATUSES } from '../constants';
@@ -17,6 +17,10 @@ export default function TicketDetails() {
   const { t } = L;
   const { departmentIds = [], zones } = useMeta();
   const [zone, setZone] = useState('');
+  const [worker, setWorker] = useState('');
+  const [workers, setWorkers] = useState([]);
+  const [noteText, setNoteText] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
   const { id } = useParams();
   const navigate = useNavigate();
   const [complaint, setComplaint] = useState(null);
@@ -29,6 +33,7 @@ export default function TicketDetails() {
   const [isSaving, setIsSaving] = useState(false);
   const [proofUploading, setProofUploading] = useState(false);
   const [proofError, setProofError] = useState('');
+  const [merging, setMerging] = useState(false);
   const [replyLanguage, setReplyLanguage] = useState('auto');
   const [streaming, setStreaming] = useState(false);
   const [replyMeta, setReplyMeta] = useState(null);
@@ -65,12 +70,45 @@ export default function TicketDetails() {
           setPriority(found.priority || 'P3');
           setDepartment(found.department || 'Zonal Office');
           setZone(found.zone || '');
+          setWorker(found.assignedWorker || '');
         }
       }
     } catch (error) {
       console.error('Failed to fetch complaint:', error);
     } finally {
       if (!isPolling) setLoading(false);
+    }
+  };
+
+  useEffect(() => { api.get('/staff').then(({ data }) => setWorkers(data.workers || [])).catch(() => setWorkers([])); }, []);
+
+  const addNote = async (e) => {
+    e.preventDefault();
+    if (!noteText.trim()) return;
+    setSavingNote(true);
+    try {
+      const { data } = await api.post(`/complaints/${id}/notes`, { text: noteText });
+      setComplaint((c) => ({ ...c, internalNotes: [...(c.internalNotes || []), data] }));
+      setNoteText('');
+    } catch (err) {
+      alert(err.response?.data?.message || t('notes_failed'));
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  // Close this complaint as a duplicate of an earlier report of the same issue.
+  const handleMerge = async (intoId) => {
+    if (!window.confirm(t('merge_confirm'))) return;
+    setMerging(true);
+    try {
+      const { data } = await api.post(`/complaints/${id}/merge`, { intoId });
+      alert(t('merge_done', { ticket: data.merged, into: data.into }));
+      fetchComplaint();
+    } catch (err) {
+      alert(err.response?.data?.message || t('merge_failed'));
+    } finally {
+      setMerging(false);
     }
   };
 
@@ -102,6 +140,7 @@ export default function TicketDetails() {
         priority,
         department,
         zone: zone || null,
+        assignedWorker: worker || null,
         sendEmail: true
       });
       const replyToSend = editedReply && editedReply !== GENERATING;
@@ -369,6 +408,20 @@ export default function TicketDetails() {
             )}
           </div>
 
+          <div className="card notes-card">
+            <h3 className="card-title"><StickyNote size={18} color="var(--accent)" /> {t('notes_title')} <span className="notes-private"><Lock size={12} /> {t('notes_private')}</span></h3>
+            <ul className="notes-list">
+              {(complaint.internalNotes || []).map((n, i) => (
+                <li key={i}><p>{n.text}</p><span>{n.author} · {L.date(n.at, { dateStyle: 'medium', timeStyle: 'short' })}</span></li>
+              ))}
+              {!(complaint.internalNotes || []).length && <li className="form-note">{t('notes_empty')}</li>}
+            </ul>
+            <form className="notes-form" onSubmit={addNote}>
+              <input value={noteText} onChange={(e) => setNoteText(e.target.value)} maxLength={1000} placeholder={t('notes_placeholder')} aria-label={t('notes_title')} />
+              <button type="submit" className="button" disabled={savingNote || !noteText.trim()}>{savingNote ? <Loader size={15} className="spin" /> : <Plus size={15} />} {t('notes_add')}</button>
+            </form>
+          </div>
+
           <div className="ticket-pair">
             <div className="card">
               <h3 className="card-title"><History size={18} color="var(--primary)" /> {t('timeline_title')}</h3>
@@ -423,8 +476,14 @@ export default function TicketDetails() {
                       <Link to={`/ticket/${d.complaintId}`}>
                         <span className="ticket-id">#{shortId(d.complaintId)}</span>
                         <span className={`match-score ${d.score >= 0.8 ? 'strong' : ''}`}>{t('match', { value: (d.score * 100).toFixed(0) })}</span>
+                        {d.distanceM != null && <span className="match-distance">{t('metoo_distance', { m: d.distanceM })}</span>}
                         <ChevronRight size={15} />
                       </Link>
+                      {!['RESOLVED', 'CLOSED'].includes(complaint.status) && (
+                        <button type="button" className="kb-act merge-btn" onClick={() => handleMerge(d.complaintId)} disabled={merging}>
+                          <GitMerge size={13} /> {t('merge_btn')}
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -432,6 +491,15 @@ export default function TicketDetails() {
             )}
 
             <div className="ticket-controls">
+              <div className="form-group full">
+                <label htmlFor="ticket-worker">{t('worker_label')}</label>
+                <select id="ticket-worker" value={worker} onChange={(e) => setWorker(e.target.value)}>
+                  <option value="">{t('worker_none')}</option>
+                  {workers.filter((w) => w.active || w._id === worker)
+                    .sort((a, b) => Number(b.department === complaint.department) - Number(a.department === complaint.department))
+                    .map((w) => <option key={w._id} value={w._id}>{w.name} · {L.department(w.department)}{w.zone ? ` · ${w.zone}` : ''} ({t('staff_open_tickets', { count: w.openTickets })})</option>)}
+                </select>
+              </div>
               <div className="form-group">
                 <label htmlFor="ticket-status">{t('label_status')}</label>
                 <select id="ticket-status" value={status} onChange={(e) => setStatus(e.target.value)}>

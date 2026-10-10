@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink, Link, Navigate, useLocation } from 'react-router-dom';
-import { Map, Globe, LogOut, LogIn, Loader, Menu, X } from 'lucide-react';
+import { Map, Globe, LogOut, LogIn, Loader, Menu, X, UserCog } from 'lucide-react';
 import Logo, { LogoMark } from './components/Logo';
 import { useTranslation } from 'react-i18next';
 import Home from './pages/Home';
@@ -15,6 +15,8 @@ import ChatWidget from './components/ChatWidget';
 import AskPcmc from './pages/AskPcmc';
 import KnowledgeBase from './pages/KnowledgeBase';
 import Transparency from './pages/Transparency';
+import Account from './pages/Account';
+import FieldStaff from './pages/FieldStaff';
 import Skyline from './components/Skyline';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MetaProvider, useMeta } from './context/MetaContext';
@@ -77,6 +79,7 @@ function Shell() {
                 </NavLink>
                 <NavLink to="/analytics">{t('nav_analytics')}</NavLink>
                 <NavLink to="/knowledge">{t('nav_knowledge')}</NavLink>
+                <NavLink to="/account" className="nav-icon-link" title={t('nav_account')}><UserCog size={14} /> {t('nav_account')}</NavLink>
               </>
             )}
 
@@ -112,6 +115,8 @@ function Shell() {
           <Route path="/map" element={<OfficerRoute><MapView /></OfficerRoute>} />
           <Route path="/analytics" element={<OfficerRoute><Analytics /></OfficerRoute>} />
           <Route path="/knowledge" element={<OfficerRoute><KnowledgeBase /></OfficerRoute>} />
+          <Route path="/account" element={<OfficerRoute><Account /></OfficerRoute>} />
+          <Route path="/staff" element={<OfficerRoute><FieldStaff /></OfficerRoute>} />
           <Route path="/ticket/:id" element={<OfficerRoute><TicketDetails /></OfficerRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

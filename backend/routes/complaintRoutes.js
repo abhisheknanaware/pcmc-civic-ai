@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus, submitFeedback, uploadResolutionPhoto, getNearbyComplaints, supportComplaint, classifyPhoto } = require('../controllers/complaintController');
+const { createComplaint, getComplaints, updateComplaint, resetDatabase, generateReplyForTicket, translateComplaint, getComplaintStatus, submitFeedback, uploadResolutionPhoto, getNearbyComplaints, supportComplaint, classifyPhoto, mergeComplaint, addNote, bulkUpdate, eraseMyData } = require('../controllers/complaintController');
 const { protect, admin } = require('../middleware/authMiddleware');
 const rateLimit = require('../middleware/rateLimit');
 
@@ -31,14 +31,18 @@ const memoryImage = multer({ storage: multer.memoryStorage(), limits: { fileSize
 router.post('/classify-image', rateLimit({ windowMs: 60 * 1000, max: 20 }), memoryImage.single('image'), classifyPhoto);
 router.get('/nearby', rateLimit({ windowMs: 60 * 1000, max: 30 }), getNearbyComplaints);
 router.post('/support', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), supportComplaint);
+router.post('/erase', rateLimit({ windowMs: 60 * 60 * 1000, max: 5 }), eraseMyData);
 router.post('/feedback', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), submitFeedback);
 
 // Officer endpoints
 router.get('/', protect, getComplaints);
+router.post('/bulk', protect, bulkUpdate);
 router.delete('/reset', protect, admin, resetDatabase);
 router.post('/:id/generate-reply', protect, generateReplyForTicket);
 router.post('/:id/translate', protect, translateComplaint);
 router.patch('/:id', protect, updateComplaint);
+router.post('/:id/merge', protect, mergeComplaint);
+router.post('/:id/notes', protect, addNote);
 router.post('/:id/resolution-photo', protect, imageUpload.single('image'), uploadResolutionPhoto);
 
 module.exports = router;

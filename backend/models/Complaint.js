@@ -76,10 +76,15 @@ const complaintSchema = new mongoose.Schema({
   slaDeadline: { type: Date },
   slaBreached: { type: Boolean, default: false },
   resolvedAt: { type: Date },
+  anonymizedAt: { type: Date },   // personal data removed (retention policy or citizen request)
+  anonymizedReason: { type: String, enum: ['retention', 'citizen_request'] },
   duplicates: [{
     complaintId: { type: mongoose.Schema.Types.ObjectId, ref: 'Complaint' },
-    score: Number
+    score: Number,
+    distanceM: Number
   }],
+  // Set when an officer merges this complaint into the original report of the same issue.
+  duplicateOf: { type: mongoose.Schema.Types.ObjectId, ref: 'Complaint' },
   imageUrl: { type: String },
   // "After" photo uploaded by the officer as proof that the issue was fixed.
   resolutionImageUrl: { type: String },
@@ -102,6 +107,10 @@ const complaintSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  // Field worker doing the job on the ground, and officers' internal notes (never shown to citizens).
+  assignedWorker: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldWorker' },
+  assignedWorkerName: { type: String },
+  internalNotes: [{ _id: false, author: String, text: { type: String, maxlength: 1000 }, at: { type: Date, default: Date.now } }],
   // Every status change (and citizen reopening), shown to the citizen as a timeline.
   history: [{
     _id: false,

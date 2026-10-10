@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  BarChart3, Inbox, AlertTriangle, CheckCircle, Clock, Trash2, Loader, Search, ArrowRight, ShieldAlert, Sparkles, Map, Users,
+  BarChart3, Inbox, AlertTriangle, CheckCircle, Clock, Trash2, Loader, Search, ArrowRight, ShieldAlert, Sparkles, Map, Users, HardHat,
 } from 'lucide-react';
 import useLabels from '../hooks/useLabels';
 import { PRIORITIES } from '../constants';
@@ -64,6 +64,10 @@ export default function Dashboard() {
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
   const [slaFilter, setSlaFilter] = useState(null);
+  const [selected, setSelected] = useState([]);
+  const [bulk, setBulk] = useState({ status: '', priority: '', assignedWorker: '' });
+  const [workers, setWorkers] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const fetchComplaints = async (isPolling = false) => {
     try {
@@ -74,7 +78,7 @@ export default function Dashboard() {
     finally { if (!isPolling) setLoading(false); }
   };
 
-  useEffect(() => { fetchComplaints(); }, []);
+  useEffect(() => { fetchComplaints(); api.get('/staff').then(({ data }) => setWorkers((data.workers || []).filter((w) => w.active))).catch(() => {}); }, []);
 
   // New complaints are classified in the background; refresh until they are.
   useEffect(() => {
@@ -82,6 +86,23 @@ export default function Dashboard() {
     const interval = setInterval(() => fetchComplaints(true), 2500);
     return () => clearInterval(interval);
   }, [complaints]);
+
+  const applyBulk = async () => {
+    setBulkBusy(true);
+    try {
+      const { data } = await api.post('/complaints/bulk', {
+        ids: selected, status: bulk.status || undefined, priority: bulk.priority || undefined, assignedWorker: bulk.assignedWorker || undefined,
+      });
+      alert(t('bulk_done', { count: data.updated }));
+      setSelected([]);
+      setBulk({ status: '', priority: '', assignedWorker: '' });
+      fetchComplaints(true);
+    } catch (err) {
+      alert(err.response?.data?.message || t('bulk_failed'));
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   if (loading) return <div className="page-loading"><Loader className="spin" size={28} /> {t('loading_workspace')}</div>;
 
@@ -117,6 +138,9 @@ export default function Dashboard() {
   const scope = officer?.department && officer.role !== 'admin' ? L.department(officer.department) : t('dash_scope_all');
 
   return <div className="page-container dash">
+    {officer?.weakPassword && (
+      <Link to="/account" className="weak-pw-banner"><ShieldAlert size={16} /> {t('pw_weak_banner')}</Link>
+    )}
     <section className="dash-hero">
       <div className="dash-hero-copy">
         <p className="dash-hero-eyebrow"><Sparkles size={14} /> {t('dash_eyebrow')} · {scope}</p>
@@ -131,6 +155,7 @@ export default function Dashboard() {
       <div className="dash-hero-actions">
         <Link to="/analytics" className="button light"><BarChart3 size={17} />{t('view_analytics')}</Link>
         <Link to="/map" className="button outline-light"><Map size={17} />{t('nav_map')}</Link>
+        <Link to="/staff" className="button outline-light"><HardHat size={17} />{t('staff_title')}</Link>
         {officer?.role === 'admin' && <button type="button" onClick={handleReset} className="button ghost-light"><Trash2 size={16} />{t('clear_db')}</button>}
       </div>
     </section>
@@ -165,6 +190,28 @@ export default function Dashboard() {
           <span className="dash-count">{t('dash_showing', { shown: filteredComplaints.length, total: complaints.length })}</span>
         </div>
       </div>
+
+      {selected.length > 0 && (
+        <div className="bulk-bar">
+          <strong>{t('bulk_selected', { count: selected.length })}</strong>
+          <select value={bulk.status} onChange={(e) => setBulk((b) => ({ ...b, status: e.target.value }))} aria-label={t('label_status')}>
+            <option value="">{t('bulk_status')}</option>
+            {['ASSIGNED', 'IN_PROGRESS', 'WAITING_FOR_CUSTOMER', 'RESOLVED', 'CLOSED'].map((s) => <option key={s} value={s}>{L.status(s)}</option>)}
+          </select>
+          <select value={bulk.priority} onChange={(e) => setBulk((b) => ({ ...b, priority: e.target.value }))} aria-label={t('label_priority')}>
+            <option value="">{t('bulk_priority')}</option>
+            {PRIORITIES.map((p) => <option key={p} value={p}>{L.priority(p)}</option>)}
+          </select>
+          <select value={bulk.assignedWorker} onChange={(e) => setBulk((b) => ({ ...b, assignedWorker: e.target.value }))} aria-label={t('worker_label')}>
+            <option value="">{t('bulk_worker')}</option>
+            {workers.map((w) => <option key={w._id} value={w._id}>{w.name} · {L.department(w.department)}</option>)}
+          </select>
+          <button type="button" className="button small" disabled={bulkBusy || (!bulk.status && !bulk.priority && !bulk.assignedWorker)} onClick={applyBulk}>
+            {bulkBusy ? <Loader size={14} className="spin" /> : <CheckCircle size={14} />} {t('bulk_apply')}
+          </button>
+          <button type="button" className="button small secondary" onClick={() => setSelected([])}>{t('bulk_clear')}</button>
+        </div>
+      )}
 
       <div className="table-filters">
         {canFilterDepartment ? (
@@ -208,6 +255,8 @@ export default function Dashboard() {
         <table className="data-table dash-table">
           <thead>
             <tr>
+              <th className="col-select"><input type="checkbox" aria-label={t('bulk_select_all')} checked={filteredComplaints.length > 0 && selected.length === filteredComplaints.length}
+                onChange={(e) => setSelected(e.target.checked ? filteredComplaints.map((c) => c._id) : [])} /></th>
               <th>{t('col_id')}</th><th>{t('col_category')}</th><th>{t('col_department')}</th><th>{t('label_zone')}</th><th>{t('col_priority')}</th>
               <th>{t('col_sla')}</th><th>{t('col_status')}</th><th aria-label={t('col_actions')} />
             </tr>
@@ -220,6 +269,8 @@ export default function Dashboard() {
               const status = c.status || 'OPEN';
               return (
                 <tr key={c._id} className={`prio-row-${priority.toLowerCase()} ${overdue ? 'is-overdue' : ''}`}>
+                  <td className="col-select"><input type="checkbox" aria-label={t('bulk_select_one', { ticket: c.ticketNumber })} checked={selected.includes(c._id)}
+                    onChange={(e) => setSelected((s) => (e.target.checked ? [...s, c._id] : s.filter((x) => x !== c._id)))} /></td>
                   <td><span className="ticket-chip">{c.ticketNumber || `#${c._id.slice(-6)}`}</span></td>
                   <td className="dash-cat">
                     <strong>{L.category(c.category)}{c.supportCount > 0 && <span className="affected-chip" title={t('metoo_affected', { count: c.supportCount + 1 })}><Users size={12} /> {c.supportCount + 1}</span>}</strong>
@@ -236,13 +287,14 @@ export default function Dashboard() {
                         </span>
                       ) : <span className="sla-pill none">{L.sla('No SLA')}</span>}
                   </td>
-                  <td><span className={`status-chip tone-${STATUS_TONE[status] || 'sky'}`}>{L.status(status)}</span></td>
+                  <td><span className={`status-chip tone-${STATUS_TONE[status] || 'sky'}`}>{L.status(status)}</span>
+                    {c.assignedWorkerName && <span className="worker-tag"><HardHat size={11} /> {c.assignedWorkerName}</span>}</td>
                   <td><Link to={`/ticket/${c._id}`} className="dash-view" aria-label={`${t('view')} ${c.ticketNumber || ''}`}>{t('view')} <ArrowRight size={15} /></Link></td>
                 </tr>
               );
             })}
             {filteredComplaints.length === 0 && (
-              <tr><td colSpan="8" className="empty-state"><Inbox size={28} /><br />{t('no_tickets')}</td></tr>
+              <tr><td colSpan="9" className="empty-state"><Inbox size={28} /><br />{t('no_tickets')}</td></tr>
             )}
           </tbody>
         </table>

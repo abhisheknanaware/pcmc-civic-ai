@@ -10,6 +10,7 @@ import { getComplaintStatus } from '../services/api';
 import ComplaintTimeline from '../components/ComplaintTimeline';
 import FeedbackForm from '../components/FeedbackForm';
 import StarRating from '../components/StarRating';
+import EraseMyData from '../components/EraseMyData';
 
 // Progress shown on the result banner; WAITING_FOR_CUSTOMER sits with "in progress".
 const STAGES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED'];
@@ -211,6 +212,7 @@ export default function TrackComplaint() {
               <h3 className="card-title">{t('timeline_title')}</h3>
               <ComplaintTimeline timeline={result.timeline} status={status} />
             </div>
+            <EraseMyData ticketNumber={result.ticketNumber} email={email.trim()} />
           </div>
         </section>
       )}

@@ -1,0 +1,107 @@
+# One-command setup:  docker compose up -d --build   ->  http://localhost:8080
+# First start downloads the AI models (Qwen3 8B + bge-m3, about 6 GB) and the NLP image is large (PyTorch).
+# Settings and secrets come from .env next to this file (copy .env.docker.example).
+name: pcmc-civic
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:0.12.6
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m
+    # NVIDIA GPU (much faster). Remove this block on machines without one.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Pulls the two models once, then exits. Later starts are instant because the volume keeps them.
+  ollama-pull:
+    image: ollama/ollama:0.12.6
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull ${REPLY_MODEL:-qwen3:8b} && ollama pull bge-m3"]
+    restart: "no"
+
+  nlp:
+    build:
+      context: ./nlp
+      additional_contexts:
+        config: ./config
+    restart: unless-stopped
+    depends_on: [ollama]
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      REPLY_MODEL: ${REPLY_MODEL:-qwen3:8b}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      KB_REFRESH_DAYS: ${KB_REFRESH_DAYS:-7}
+      KB_REFRESH_HOUR: ${KB_REFRESH_HOUR:-2}
+      HF_HOME: /cache/huggingface
+      XDG_CACHE_HOME: /cache        # Whisper model
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./nlp/data:/app/data          # crawled PCMC data, Qdrant index, officer answers
+      - ./nlp/models:/app/models      # optional local CLIP copy
+      - hf-cache:/cache               # transformer / Whisper downloads
+
+  backend:
+    build:
+      context: ./backend
+      additional_contexts:
+        config: ./config
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      nlp:
+        condition: service_started
+    environment:
+      PORT: 5000
+      TRUST_PROXY: "1"
+      MONGO_URI: mongodb://mongo:27017/complaint-ai
+      NLP_SERVICE_URL: http://nlp:8000/process
+      OLLAMA_URL: http://ollama:11434
+      REPLY_MODEL: ${REPLY_MODEL:-qwen3:8b}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      RETENTION_DAYS: ${RETENTION_DAYS:-365}
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USER: ${EMAIL_USER:-}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      CLOUDINARY_NAME: ${CLOUDINARY_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_SECRET_KEY: ${CLOUDINARY_SECRET_KEY:-}
+    volumes:
+      - uploads:/app/uploads
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on: [backend]
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  mongo-data:
+  ollama-models:
+  hf-cache:
+  uploads:

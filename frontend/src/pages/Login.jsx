@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, Loader, LogIn, ShieldCheck } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, popLogoutReason } from '../context/AuthContext';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -14,6 +14,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const destination = location.state?.from || '/dashboard';
+  const [notice] = useState(() => popLogoutReason());
 
   if (officer) return <Navigate to={destination} replace />;
 
@@ -25,7 +26,8 @@ export default function Login() {
       await login(email.trim(), password);
       navigate(destination, { replace: true });
     } catch (err) {
-      setError(err.response?.status === 401 ? t('login_invalid') : t('login_failed'));
+      const status = err.response?.status;
+      setError(status === 401 ? t('login_invalid') : status === 423 || status === 429 ? err.response?.data?.message : t('login_failed'));
     } finally {
       setLoading(false);
     }
@@ -39,6 +41,7 @@ export default function Login() {
         <p className="page-copy">{t('login_subtitle')}</p>
       </div>
       <form className="card auth-card" onSubmit={handleSubmit}>
+        {notice === 'idle' && <div className="alert info"><AlertCircle size={18} /> {t('login_idle_notice')}</div>}
         {error && <div className="alert"><AlertCircle size={18} /> {error}</div>}
         <div className="form-group">
           <label htmlFor="login-email">{t('email_label')}</label>

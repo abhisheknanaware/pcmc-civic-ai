@@ -4,6 +4,7 @@ import {
   Archive, AlertCircle, FileText, PenLine, Trash2, CheckCheck,
 } from 'lucide-react';
 import AnswerForm from '../components/AnswerForm';
+import RefreshPanel from '../components/RefreshPanel';
 import useLabels from '../hooks/useLabels';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -113,6 +114,8 @@ export default function KnowledgeBase() {
           </div>
         ))}
       </div>
+
+      <RefreshPanel isAdmin={isAdmin} onFind={(text) => { setTab('documents'); setCategory('ALL'); setStatus('ALL'); setQuery(text); }} />
 
       <div className="kb-tabs" role="tablist">
         <button type="button" role="tab" aria-selected={tab === 'documents'} className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}>

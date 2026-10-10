@@ -2,6 +2,7 @@
 //   node scripts/create_officer.js <email> <password> "<name>" [admin|agent] ["<department>"]
 // A department restricts an agent to that department's complaints; admins see everything.
 require('dotenv').config();
+const { passwordProblem } = require('../services/passwordPolicy');
 const mongoose = require('mongoose');
 const connectDB = require('../config/db');
 const User = require('../models/User');
@@ -13,8 +14,9 @@ const { pcmc } = require('../services/pcmcConfig');
     console.error('Usage: node scripts/create_officer.js <email> <password> "<name>" [admin|agent] ["<department>"]');
     process.exit(1);
   }
-  if (password.length < 8) {
-    console.error('Password must be at least 8 characters.');
+  const problem = passwordProblem(password, email);
+  if (problem) {
+    console.error(problem);
     process.exit(1);
   }
   if (department && !pcmc.departments.some((d) => d.id === department)) {

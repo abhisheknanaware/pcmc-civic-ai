@@ -1,4 +1,5 @@
 const Complaint = require('../models/Complaint');
+const FieldWorker = require('../models/FieldWorker');
 const Ticket = require('../models/Ticket');
 const ChatSession = require('../models/ChatSession');
 const axios = require('axios');
@@ -9,7 +10,9 @@ const { sanitizePii } = require('../services/piiRedaction');
 const { pcmc, ZONE_IDS } = require('../services/pcmcConfig');
 const { nextTicketNumber, normalizeTicketNumber } = require('../services/ticketNumbers');
 const notifications = require('../services/notifications');
+const { logAudit } = require('../services/audit');
 const cloudinary = require('cloudinary').v2;
+const privacy = require('../services/privacy');
 const exifr = require('exifr');
 
 cloudinary.config({
@@ -232,39 +235,42 @@ exports.createComplaint = async (req, res) => {
         entities: nlpResult.entities
       }, { new: true });
 
-      // 3. Check for duplicates
+      // 3. Check for duplicates: same category, still open, last 7 days, in the same zone or within ~1 km.
+      //    The NLP service compares meaning (works across languages) and map distance.
       try {
-        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-
+        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const lat = finalComplaint.location?.latitude;
+        const lng = finalComplaint.location?.longitude;
+        const near = lat != null && lng != null
+          ? [{ 'location.latitude': { $gte: lat - 0.01, $lte: lat + 0.01 }, 'location.longitude': { $gte: lng - 0.01, $lte: lng + 0.01 } }]
+          : [];
+        const where = [...(finalComplaint.zone ? [{ zone: finalComplaint.zone }] : []), ...near];
         const recentComplaints = await Complaint.find({
           _id: { $ne: newComplaint._id },
-          status: { $in: ['OPEN', 'ASSIGNED', 'IN_PROGRESS'] },
-          // Compare within the same zone when known; the text similarity check does the rest.
-          ...(finalComplaint.zone ? { zone: finalComplaint.zone } : {}),
-          department: nlpResult.department,
+          status: { $in: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_FOR_CUSTOMER'] },
           category: nlpResult.category,
-          createdAt: { $gte: twoDaysAgo }
-        });
+          createdAt: { $gte: since },
+          ...(where.length ? { $or: where } : {}),
+        }).select('sanitizedText originalText location').limit(100);
 
         if (recentComplaints.length > 0) {
-           const existing_complaints = recentComplaints.map(c => ({
-             id: c._id.toString(),
-             text: c.originalText
-           }));
+          const dupResponse = await axios.post(`${new URL(process.env.NLP_SERVICE_URL || 'http://localhost:8000/process').origin}/check-duplicates`, {
+            new_text: sanitizedText,
+            lat: lat ?? null,
+            lng: lng ?? null,
+            existing_complaints: recentComplaints.map((c) => ({
+              id: c._id.toString(),
+              text: c.sanitizedText && c.sanitizedText !== 'Processing...' ? c.sanitizedText : c.originalText,
+              lat: c.location?.latitude ?? null,
+              lng: c.location?.longitude ?? null,
+            })),
+          }, { timeout: 30000 });
 
-           const dupResponse = await axios.post('http://localhost:8000/check-duplicates', {
-             new_text: finalComplaint.originalText,
-             existing_complaints
-           });
-
-           if (dupResponse.data.duplicates && dupResponse.data.duplicates.length > 0) {
-             const duplicates = dupResponse.data.duplicates.map(d => ({
-               complaintId: d.id,
-               score: d.score
-             }));
-             await Complaint.findByIdAndUpdate(newComplaint._id, { duplicates });
-             finalComplaint.duplicates = duplicates;
-           }
+          if (dupResponse.data.duplicates && dupResponse.data.duplicates.length > 0) {
+            const duplicates = dupResponse.data.duplicates.map((d) => ({ complaintId: d.id, score: d.score, distanceM: d.distanceM }));
+            await Complaint.findByIdAndUpdate(newComplaint._id, { duplicates });
+            finalComplaint.duplicates = duplicates;
+          }
         }
       } catch (err) {
         console.error("Duplicate checking failed:", err.message);
@@ -318,8 +324,26 @@ exports.updateComplaint = async (req, res) => {
       return res.status(400).json({ message: 'Invalid zone.' });
     }
 
-    const existing = await Complaint.findById(id).select('status resolvedAt createdAt history');
+    const existing = await Complaint.findById(id).select('status resolvedAt createdAt history department');
     if (!existing) return res.status(404).json({ message: 'Complaint not found' });
+    // Department officers may only change their own department's complaints (admins: any).
+    if (req.user.role !== 'admin' && req.user.department && existing.department !== req.user.department) {
+      return res.status(403).json({ message: 'This complaint belongs to another department.' });
+    }
+
+    // Field staff assignment (null unassigns). Assigning an open ticket moves it to "Assigned".
+    if ('assignedWorker' in req.body) {
+      if (req.body.assignedWorker) {
+        const worker = await FieldWorker.findById(req.body.assignedWorker).select('name active');
+        if (!worker || !worker.active) return res.status(400).json({ message: 'Choose an active field worker.' });
+        updateData.assignedWorker = worker._id;
+        updateData.assignedWorkerName = worker.name;
+        if (!updateData.status && existing.status === 'OPEN') updateData.status = 'ASSIGNED';
+      } else {
+        updateData.assignedWorker = null;
+        updateData.assignedWorkerName = null;
+      }
+    }
 
     const statusChanged = Boolean(updateData.status) && updateData.status !== existing.status;
     const update = { $set: updateData };
@@ -334,6 +358,7 @@ exports.updateComplaint = async (req, res) => {
     }
 
     const updatedComplaint = await Complaint.findByIdAndUpdate(id, update, { new: true });
+    logAudit(req, 'complaint.update', updatedComplaint, { changes: Object.keys(updateData).filter((k) => k !== 'finalReply'), status: statusChanged ? updatedComplaint.status : undefined, replied: Boolean(updateData.finalReply), worker: updateData.assignedWorkerName || undefined });
 
     // One email per save: the officer's reply (with the new status) or, without a reply, the status change alone.
     const reply = sendEmail && updatedComplaint.finalReply ? updatedComplaint.finalReply : null;
@@ -421,6 +446,96 @@ exports.supportComplaint = async (req, res) => {
   }
 };
 
+// POST /api/complaints/:id/notes { text } — internal note for officers; never shown to the citizen.
+exports.addNote = async (req, res) => {
+  const text = String(req.body?.text || '').trim().slice(0, 1000);
+  if (!text) return res.status(400).json({ message: 'Write a note first.' });
+  const complaint = await Complaint.findById(req.params.id).select('department ticketNumber');
+  if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+  if (req.user.role !== 'admin' && req.user.department && complaint.department !== req.user.department) {
+    return res.status(403).json({ message: 'This complaint belongs to another department.' });
+  }
+  const note = { author: req.user.name || req.user.email, text, at: new Date() };
+  await Complaint.updateOne({ _id: complaint._id }, { $push: { internalNotes: note } });
+  logAudit(req, 'complaint.note', complaint);
+  res.status(201).json(note);
+};
+
+// POST /api/complaints/bulk { ids, status?, priority?, assignedWorker? } — the same rules as a single update.
+exports.bulkUpdate = async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 100) : [];
+  const { status, priority, assignedWorker } = req.body || {};
+  if (!ids.length || (!status && !priority && assignedWorker === undefined)) {
+    return res.status(400).json({ message: 'Select complaints and a change to apply.' });
+  }
+  if (status && !Complaint.schema.path('status').enumValues.includes(status)) return res.status(400).json({ message: 'Invalid status.' });
+  if (priority && !['P1', 'P2', 'P3', 'P4'].includes(priority)) return res.status(400).json({ message: 'Invalid priority.' });
+  let worker = null;
+  if (assignedWorker) {
+    worker = await FieldWorker.findById(assignedWorker).select('name active');
+    if (!worker || !worker.active) return res.status(400).json({ message: 'Choose an active field worker.' });
+  }
+  const scope = req.user.role !== 'admin' && req.user.department ? { department: req.user.department } : {};
+  const complaints = await Complaint.find({ _id: { $in: ids }, ...scope });
+  let updated = 0;
+  for (const c of complaints) {
+    const before = c.status;
+    if (priority) c.priority = priority;
+    if (worker) {
+      c.assignedWorker = worker._id;
+      c.assignedWorkerName = worker.name;
+      if (!status && c.status === 'OPEN') c.status = 'ASSIGNED';
+    }
+    if (status) c.status = status;
+    if (c.status !== before) {
+      if (!c.history?.length) c.history.push({ event: 'OPEN', at: c.createdAt });
+      c.history.push({ event: c.status, at: new Date() });
+      const closed = CLOSED_STATUSES.includes(c.status);
+      if (closed && !c.resolvedAt) c.resolvedAt = new Date();
+      if (!closed) c.resolvedAt = null;
+    }
+    await c.save();
+    if (c.status !== before) notifications.statusChanged(c, c.status);
+    updated += 1;
+  }
+  logAudit(req, 'complaint.bulk', `${updated} complaints`, { status, priority, worker: worker?.name });
+  res.json({ updated, skipped: ids.length - updated });
+};
+
+// POST /api/complaints/:id/merge { intoId } — officer closes a duplicate into the original complaint.
+// The citizen's complaint is closed with a note pointing to the original ticket, and they count as affected on it.
+exports.mergeComplaint = async (req, res) => {
+  try {
+    const { intoId } = req.body || {};
+    if (!intoId || intoId === req.params.id) return res.status(400).json({ message: 'Choose a different complaint to merge into.' });
+    const [dup, original] = await Promise.all([Complaint.findById(req.params.id), Complaint.findById(intoId)]);
+    if (!dup || !original) return res.status(404).json({ message: 'Complaint not found' });
+    if (CLOSED_STATUSES.includes(original.status)) return res.status(409).json({ message: 'The original complaint is already closed.' });
+    if (req.user.role !== 'admin' && req.user.department && dup.department !== req.user.department) {
+      return res.status(403).json({ message: 'This complaint belongs to another department.' });
+    }
+
+    const emailHash = supporterHash(dup.userEmail);
+    await Complaint.updateOne({ _id: original._id, 'supporters.emailHash': { $ne: emailHash }, userEmail: { $ne: dup.userEmail } },
+      { $push: { supporters: { emailHash } }, $inc: { supportCount: 1 } });
+
+    const note = `This issue was already reported as ${original.ticketNumber}. Your complaint has been merged with it, and you are counted as an affected citizen. Please track ${original.ticketNumber} for updates.`;
+    if (!dup.history?.length) dup.history.push(...timeline(dup));
+    dup.status = 'CLOSED';
+    dup.resolvedAt = new Date();
+    dup.duplicateOf = original._id;
+    dup.finalReply = note;
+    dup.history.push({ event: 'CLOSED', at: new Date() });
+    await dup.save();
+    notifications.statusChanged(dup, 'CLOSED', note);
+    logAudit(req, 'complaint.merge', dup, { into: original.ticketNumber });
+    res.json({ merged: dup.ticketNumber, into: original.ticketNumber });
+  } catch (error) {
+    console.error('Merge failed:', error.message);
+    res.status(500).json({ message: 'Could not merge the complaints.' });
+  }
+};
+
 // Officer uploads an "after" photo as proof of the fix (Cloudinary, like citizen photos).
 exports.uploadResolutionPhoto = async (req, res) => {
   const file = req.file;
@@ -434,6 +549,7 @@ exports.uploadResolutionPhoto = async (req, res) => {
     const result = await cloudinary.uploader.upload(file.path, { folder: 'pmc_resolutions' });
     const updated = await Complaint.findByIdAndUpdate(req.params.id,
       { resolutionImageUrl: result.secure_url, resolutionImageAt: new Date() }, { new: true });
+    logAudit(req, 'complaint.proof_photo', updated);
     res.json(updated);
   } catch (error) {
     console.error('Resolution photo upload failed:', error.message);
@@ -445,7 +561,8 @@ exports.uploadResolutionPhoto = async (req, res) => {
 
 exports.resetDatabase = async (req, res) => {
   try {
-    await Complaint.deleteMany({});
+    const { deletedCount } = await Complaint.deleteMany({});
+    logAudit(req, 'complaint.reset_all', null, { deleted: deletedCount });
     res.json({ message: 'Database cleared successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -609,5 +726,31 @@ exports.submitFeedback = async (req, res) => {
   } catch (error) {
     console.error('Feedback error:', error.message);
     res.status(500).json({ message: 'Could not save your feedback.' });
+  }
+};
+
+// Public: a citizen asks for their personal data to be removed (same ticket + email ownership check).
+// Every complaint filed with that email is anonymised. Open issues stay in the queue so they still get
+// fixed, but the citizen will no longer receive updates about them.
+exports.eraseMyData = async (req, res) => {
+  const ticketNumber = normalizeTicketNumber(req.body?.ticketNumber);
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!ticketNumber || !email || req.body?.confirm !== true) {
+    return res.status(400).json({ message: 'Ticket number, email and confirmation are required.' });
+  }
+  try {
+    const owner = await Complaint.findOne({ ticketNumber }).select('userEmail');
+    if (!owner || owner.userEmail.trim().toLowerCase() !== email) {
+      return res.status(404).json({ message: 'No complaint found for this ticket number and email.' });
+    }
+    const mine = await Complaint.find({ userEmail: { $in: [email, owner.userEmail] } })
+      .collation({ locale: 'en', strength: 2 }) // case-insensitive match
+      .select('imageUrl sanitizedText location ticketNumber');
+    for (const c of mine) await privacy.anonymise(c, 'citizen_request');
+    logAudit(req, 'privacy.citizen_erasure', ticketNumber, { complaints: mine.length, actor: 'citizen' });
+    res.json({ erased: mine.length });
+  } catch (error) {
+    console.error('Erasure failed:', error.message);
+    res.status(500).json({ message: 'Could not remove the data. Please try again.' });
   }
 };

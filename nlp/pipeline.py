@@ -174,8 +174,112 @@ def kb_status():
     from chat.hybrid import hybrid
     return {"ready": hybrid.ready, "chunks": len(hybrid.chunks)}
 
+# ---- Weekly knowledge-base refresh ----
+# Every KB_REFRESH_DAYS (default 7, 0 turns it off) the crawl -> extract -> chunk -> index pipeline runs
+# in the background during the night window starting at KB_REFRESH_HOUR, then the chatbot reloads.
+import threading
+import time as _time
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+REFRESH_DAYS = int(os.getenv("KB_REFRESH_DAYS", "7"))
+REFRESH_HOUR = int(os.getenv("KB_REFRESH_HOUR", "2"))
+_refresh = {"running": False, "step": None, "lock": threading.Lock()}
+
+def _run_refresh(trigger):
+    from ingest.refresh import run
+    from chat.hybrid import hybrid
+    try:
+        report = run(trigger=trigger, on_progress=lambda s: _refresh.update(step=s))
+        if report["ok"]:
+            hybrid.reload()
+    except Exception as error:
+        logging.getLogger(__name__).error(f"Knowledge-base refresh failed: {error}")
+    finally:
+        _refresh.update(running=False, step=None)
+
+def _start_refresh(trigger):
+    with _refresh["lock"]:
+        if _refresh["running"]:
+            return False
+        _refresh.update(running=True, step="starting")
+    threading.Thread(target=_run_refresh, args=(trigger,), daemon=True, name="kb-refresh").start()
+    return True
+
+def _next_refresh(report):
+    if REFRESH_DAYS <= 0:
+        return None
+    from ingest.extract import DOCS_PATH
+    if report and report.get("finishedAt"):
+        last = _dt.fromisoformat(report["finishedAt"])
+    elif DOCS_PATH.exists():  # first run: count from the manual crawl that built the current index
+        last = _dt.fromtimestamp(DOCS_PATH.stat().st_mtime, _tz.utc)
+    else:
+        last = None
+    now = _dt.now(_tz.utc)
+    earliest = max(last + _td(days=REFRESH_DAYS), now) if last else now
+    local = earliest.astimezone()
+    if not REFRESH_HOUR <= local.hour < REFRESH_HOUR + 3:
+        local = local.replace(hour=REFRESH_HOUR, minute=0, second=0, microsecond=0)
+        if local < earliest:
+            local += _td(days=1)
+    return local
+
+def _refresh_scheduler():
+    from ingest.refresh import load_report
+    while True:
+        _time.sleep(1800)
+        try:
+            nxt = _next_refresh(load_report())
+            if nxt and _dt.now().astimezone() >= nxt:
+                _start_refresh("schedule")
+        except Exception as error:
+            logging.getLogger(__name__).error(f"Refresh scheduler: {error}")
+
+@app.on_event("startup")
+def start_refresh_scheduler():
+    if REFRESH_DAYS > 0:
+        threading.Thread(target=_refresh_scheduler, daemon=True, name="kb-refresh-scheduler").start()
+
+@app.get("/kb/refresh")
+def kb_refresh_status(request: Request):
+    local_only(request)
+    from ingest.refresh import load_report
+    report = load_report() or {}
+    report.pop("current", None)
+    nxt = _next_refresh(report)
+    return {**report, "running": _refresh["running"], "step": _refresh["step"],
+            "nextRun": nxt.isoformat(timespec="minutes") if nxt else None, "everyDays": REFRESH_DAYS}
+
+@app.post("/kb/refresh", status_code=202)
+def kb_refresh_start(request: Request):
+    local_only(request)
+    if not _start_refresh("manual"):
+        raise HTTPException(status_code=409, detail="A refresh is already running")
+    return {"started": True}
+
+class RefreshReviewed(BaseModel):
+    reviewer: Optional[str] = None
+
+@app.post("/kb/refresh/reviewed")
+def kb_refresh_reviewed(body: RefreshReviewed, request: Request):
+    local_only(request)
+    from ingest.refresh import load_report, save_report
+    report = load_report()
+    if not report or not report.get("finishedAt"):
+        raise HTTPException(status_code=404, detail="No finished refresh to review")
+    report.update(reviewed=True, reviewedBy=body.reviewer, reviewedAt=_dt.now(_tz.utc).isoformat(timespec="seconds"))
+    save_report(report)
+    return {"reviewed": True}
+
 # Knowledge-base admin: only the Express backend on this machine (which enforces officer login) may call these.
+# In Docker the backend runs in another container, so it proves itself with a shared INTERNAL_API_TOKEN instead.
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "")
+
 def local_only(request: Request):
+    import hmac
+    token = request.headers.get("x-internal-token", "")
+    if INTERNAL_API_TOKEN and hmac.compare_digest(token, INTERNAL_API_TOKEN):
+        return
     if request.client is None or request.client.host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(status_code=403, detail="Knowledge-base admin is only available through the officer backend")
 
@@ -304,26 +408,51 @@ async def chat_understand(req: ChatRequest):
 class DuplicateRequest(BaseModel):
     new_text: str
     existing_complaints: List[Dict]
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+# Candidates are already the same category (the backend filters). Same issue = similar meaning (bge-m3,
+# works across English/Hindi/Marathi) and, when both
+# complaints have a map pin, close together. Text alone must be very similar; nearby complaints need less.
+DUP_TEXT_ONLY = 0.65  # calibrated on same-category pairs: same issue 0.59-0.89, different place 0.56-0.60
+DUP_NEARBY = 0.45     # within 300 m the map pin does most of the work
+NEARBY_METERS = 300
+
+def _distance_m(lat1, lng1, lat2, lng2):
+    import math
+    rad = math.radians
+    a = math.sin(rad(lat2 - lat1) / 2) ** 2 + math.cos(rad(lat1)) * math.cos(rad(lat2)) * math.sin(rad(lng2 - lng1) / 2) ** 2
+    return 6371000 * 2 * math.asin(math.sqrt(a))
 
 @app.post("/check-duplicates")
 async def check_duplicates(req: DuplicateRequest):
-    if not req.existing_complaints:
+    candidates = [c for c in req.existing_complaints if c.get("text")]
+    if not candidates or not req.new_text.strip():
         return {"duplicates": []}
-    
     try:
+        from chat.embeddings import embed
+        vectors = embed([req.new_text[:2000]] + [c["text"][:2000] for c in candidates])
+        sims = vectors[1:] @ vectors[0]
         duplicates = []
-        for c in req.existing_complaints:
-            # Simple sequence matcher for similarity
-            score = difflib.SequenceMatcher(None, req.new_text, c['text']).ratio()
-            if score > 0.45:
-                duplicates.append({
-                    "id": c['id'],
-                    "score": float(score)
-                })
-        return {"duplicates": duplicates}
+        for c, sim in zip(candidates, sims):
+            distance = None
+            if req.lat is not None and req.lng is not None and c.get("lat") is not None and c.get("lng") is not None:
+                distance = _distance_m(req.lat, req.lng, c["lat"], c["lng"])
+            near = distance is not None and distance <= NEARBY_METERS
+            if sim >= DUP_TEXT_ONLY or (near and sim >= DUP_NEARBY):
+                duplicates.append({"id": c["id"], "score": round(float(sim), 3),
+                                   "distanceM": None if distance is None else round(distance)})
+        duplicates.sort(key=lambda d: -d["score"])
+        return {"duplicates": duplicates[:5]}
     except Exception as e:
-        print(f"Error in duplicate detection: {e}")
-        return {"duplicates": []}
+        # Embeddings unavailable (Ollama down): fall back to plain text similarity.
+        print(f"Semantic duplicate detection failed, using text similarity: {e}")
+        duplicates = []
+        for c in candidates:
+            score = difflib.SequenceMatcher(None, req.new_text, c["text"]).ratio()
+            if score > 0.6:
+                duplicates.append({"id": c["id"], "score": float(score), "distanceM": None})
+        return {"duplicates": duplicates}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
